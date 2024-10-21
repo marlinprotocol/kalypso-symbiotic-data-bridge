@@ -11,8 +11,44 @@ use crate::utils::{
     generate_txn, h256_to_address, AppState, VaultSnapshot, ViewTxnMetadata, ViewTxnType,
 };
 
-pub async fn get_vaults_addresses(app_state: Data<AppState>) -> Result<Vec<H160>> {
-    unimplemented!("Need to know the address and ABI of the KalypsoMiddleware contract from where to query this info")
+pub async fn get_vaults_addresses(
+    rpc_api_keys: &Vec<String>,
+    app_state: Data<AppState>,
+) -> Result<Vec<H160>> {
+    let get_vaults_txn = generate_txn(
+        app_state.kalypso_middleware_addr,
+        &app_state.kalypso_middleware_abi,
+        &ViewTxnMetadata {
+            txn_type: ViewTxnType::GetVaults,
+            entity_data: None,
+            is_opted_in_data: None,
+            stake_at_data: None,
+        },
+    )
+    .context("Failed to generate transaction to retrieve vault addresses")?
+    .set_chain_id(app_state.mainnet_chain_id)
+    .to_owned();
+
+    let Some(vault_addresses_encoded) =
+        call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, get_vaults_txn).await
+    else {
+        return Err(anyhow!("Failed to fetch the vault addresses token"));
+    };
+    let Some(vault_addresses) = decode(
+        &[ParamType::Array(Box::new(ParamType::Address))],
+        &vault_addresses_encoded,
+    )
+    .context("Failed to decode getVaults address list from rpc call response")?[0]
+        .clone()
+        .into_array()
+    else {
+        return Err(anyhow!("Failed to decode the getVaults address list"));
+    };
+
+    Ok(vault_addresses
+        .into_iter()
+        .filter_map(|token| token.into_address())
+        .collect())
 }
 
 pub async fn get_stakes_data_for_vault(

@@ -6,5 +6,6 @@
         "https://ethereum.blockpi.network/v1/rpc/public",
         "https://ethereum-rpc.publicnode.com"
     ],
+    "kalypso_middleware_addr": "0x",
     "enclave_signer_file": "/app/ecdsa.sec"
 }

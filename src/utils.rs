@@ -16,6 +16,7 @@ pub struct Config {
     pub mainnet_chain_id: u64,
     pub kalypso_subnetwork: H256,
     pub http_rpc_urls: Vec<String>,
+    pub kalypso_middleware_addr: Address,
     pub enclave_signer_file: String,
 }
 
@@ -25,12 +26,14 @@ pub struct AppState {
     pub mainnet_chain_id: u64,
     pub kalypso_subnetwork: H256,
     pub http_rpc_urls: Vec<String>,
-    pub enclave_signer: SigningKey,
+    pub kalypso_middleware_addr: Address,
+    pub kalypso_middleware_abi: Abi,
     pub vault_abi: Abi,
     pub vault_storage_abi: Abi,
     pub base_delegator_abi: Abi,
     pub opt_in_service_abi: Abi,
     pub registry_abi: Abi,
+    pub enclave_signer: SigningKey,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +54,7 @@ pub struct VaultSnapshot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewTxnType {
+    GetVaults,
     Collateral,
     Delegator,
     OperatorVaultOptInService,
@@ -65,6 +69,7 @@ pub enum ViewTxnType {
 impl ViewTxnType {
     pub fn as_str(&self) -> &str {
         match self {
+            ViewTxnType::GetVaults => "getVaults",
             ViewTxnType::Collateral => "collateral",
             ViewTxnType::Delegator => "delegator",
             ViewTxnType::OperatorVaultOptInService => "OPERATOR_VAULT_OPT_IN_SERVICE",
@@ -101,7 +106,8 @@ pub fn generate_txn(
     let function = contract_abi.function(view_txn_metadata.txn_type.as_str())?;
 
     let params = match view_txn_metadata.txn_type {
-        ViewTxnType::Collateral
+        ViewTxnType::GetVaults
+        | ViewTxnType::Collateral
         | ViewTxnType::Delegator
         | ViewTxnType::OperatorVaultOptInService
         | ViewTxnType::OperatorNetworkOptInService

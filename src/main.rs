@@ -54,7 +54,9 @@ async fn main() -> Result<()> {
         mainnet_chain_id: config.mainnet_chain_id,
         kalypso_subnetwork: config.kalypso_subnetwork,
         http_rpc_urls: config.http_rpc_urls,
-        enclave_signer: enclave_signer_key,
+        kalypso_middleware_addr: config.kalypso_middleware_addr,
+        kalypso_middleware_abi: load_abi_from_json(include_str!("../KalypsoMiddleware.json"))
+            .context("Failed to deserialize 'KalypsoMiddleware' contract ABI")?,
         vault_abi: load_abi_from_json(include_str!("../IVault.json"))
             .context("Failed to deserialize 'IVault' contract ABI")?,
         vault_storage_abi: load_abi_from_json(include_str!("../IVaultStorage.json"))
@@ -65,6 +67,7 @@ async fn main() -> Result<()> {
             .context("Failed to deserialize 'IOptInService' contract ABI")?,
         registry_abi: load_abi_from_json(include_str!("../IRegistry.json"))
             .context("Failed to deserialize 'IRegistry' contract ABI")?,
+        enclave_signer: enclave_signer_key,
     });
 
     // Start actix server to expose the data bridge API endpoints outside the enclave

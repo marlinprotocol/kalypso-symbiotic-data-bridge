@@ -3,7 +3,7 @@ use ethers::abi::{Abi, Token};
 use ethers::types::transaction::eip2718::TypedTransaction;
 use ethers::types::{Address, Eip1559TransactionRequest, H160, H256, U256};
 use k256::ecdsa::SigningKey;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::from_str;
 
 pub struct ConfigManager {
@@ -36,12 +36,12 @@ pub struct AppState {
 #[derive(Debug, Deserialize)]
 pub struct SignStakeRequest {
     pub rpc_api_keys: Vec<String>,
-    pub num_of_txns: usize,
+    pub stakes_txn_size: usize,
     pub capture_timestamp: usize,
     pub block_number: Option<usize>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct VaultSnapshot {
     pub operator: Address,
     pub vault: Address,

@@ -13,6 +13,7 @@ use crate::utils::{
 
 pub async fn get_vaults_addresses(
     rpc_api_keys: &Vec<String>,
+    block_number: Option<usize>,
     app_state: Data<AppState>,
 ) -> Result<Vec<H160>> {
     let get_vaults_txn = generate_txn(
@@ -29,8 +30,13 @@ pub async fn get_vaults_addresses(
     .set_chain_id(app_state.mainnet_chain_id)
     .to_owned();
 
-    let Some(vault_addresses_encoded) =
-        call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, get_vaults_txn).await
+    let Some(vault_addresses_encoded) = call_tx_with_retries(
+        &app_state.http_rpc_urls,
+        rpc_api_keys,
+        get_vaults_txn,
+        block_number,
+    )
+    .await
     else {
         return Err(anyhow!("Failed to fetch the vault addresses token"));
     };
@@ -55,6 +61,7 @@ pub async fn get_stakes_data_for_vault(
     vault: &Address,
     capture_timestamp: usize,
     rpc_api_keys: &Vec<String>,
+    block_number: Option<usize>,
     app_state: Data<AppState>,
 ) -> Result<Vec<VaultSnapshot>> {
     let collateral_txn = generate_txn(
@@ -71,8 +78,13 @@ pub async fn get_stakes_data_for_vault(
     .set_chain_id(app_state.mainnet_chain_id)
     .to_owned();
 
-    let Some(stake_token_encoded) =
-        call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, collateral_txn).await
+    let Some(stake_token_encoded) = call_tx_with_retries(
+        &app_state.http_rpc_urls,
+        rpc_api_keys,
+        collateral_txn,
+        block_number,
+    )
+    .await
     else {
         return Err(anyhow!("Failed to fetch the vault collateral token"));
     };
@@ -98,8 +110,13 @@ pub async fn get_stakes_data_for_vault(
     .set_chain_id(app_state.mainnet_chain_id)
     .to_owned();
 
-    let Some(delegator_encoded) =
-        call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, delegator_txn).await
+    let Some(delegator_encoded) = call_tx_with_retries(
+        &app_state.http_rpc_urls,
+        rpc_api_keys,
+        delegator_txn,
+        block_number,
+    )
+    .await
     else {
         return Err(anyhow!("Failed to fetch the vault delegator address"));
     };
@@ -129,6 +146,7 @@ pub async fn get_stakes_data_for_vault(
         &app_state.http_rpc_urls,
         rpc_api_keys,
         operator_vault_opt_in_txn,
+        block_number,
     )
     .await
     else {
@@ -165,6 +183,7 @@ pub async fn get_stakes_data_for_vault(
         &app_state.http_rpc_urls,
         rpc_api_keys,
         operator_network_opt_in_txn,
+        block_number,
     )
     .await
     else {
@@ -197,8 +216,13 @@ pub async fn get_stakes_data_for_vault(
     .set_chain_id(app_state.mainnet_chain_id)
     .to_owned();
 
-    let Some(operator_registry_encoded) =
-        call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, who_registry_txn).await
+    let Some(operator_registry_encoded) = call_tx_with_retries(
+        &app_state.http_rpc_urls,
+        rpc_api_keys,
+        who_registry_txn,
+        block_number,
+    )
+    .await
     else {
         return Err(anyhow!("Failed to fetch the operator registry address"));
     };
@@ -228,6 +252,7 @@ pub async fn get_stakes_data_for_vault(
         &app_state.http_rpc_urls,
         rpc_api_keys,
         operator_entities_txn,
+        block_number,
     )
     .await
     else {
@@ -258,9 +283,13 @@ pub async fn get_stakes_data_for_vault(
         .set_chain_id(app_state.mainnet_chain_id)
         .to_owned();
 
-        let Some(operator_address_encoded) =
-            call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, operator_address_txn)
-                .await
+        let Some(operator_address_encoded) = call_tx_with_retries(
+            &app_state.http_rpc_urls,
+            rpc_api_keys,
+            operator_address_txn,
+            block_number,
+        )
+        .await
         else {
             return Err(anyhow!("Failed to fetch the operator entity address"));
         };
@@ -292,8 +321,13 @@ pub async fn get_stakes_data_for_vault(
         .set_chain_id(app_state.mainnet_chain_id)
         .to_owned();
 
-        let Some(opted_in_vault_encoded) =
-            call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, opted_in_vault_txn).await
+        let Some(opted_in_vault_encoded) = call_tx_with_retries(
+            &app_state.http_rpc_urls,
+            rpc_api_keys,
+            opted_in_vault_txn,
+            block_number,
+        )
+        .await
         else {
             return Err(anyhow!("Failed to fetch is operator opted in vault"));
         };
@@ -326,9 +360,13 @@ pub async fn get_stakes_data_for_vault(
         .set_chain_id(app_state.mainnet_chain_id)
         .to_owned();
 
-        let Some(opted_in_network_encoded) =
-            call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, opted_in_network_txn)
-                .await
+        let Some(opted_in_network_encoded) = call_tx_with_retries(
+            &app_state.http_rpc_urls,
+            rpc_api_keys,
+            opted_in_network_txn,
+            block_number,
+        )
+        .await
         else {
             return Err(anyhow!("Failed to fetch is operator opted in network"));
         };
@@ -362,8 +400,13 @@ pub async fn get_stakes_data_for_vault(
         .set_chain_id(app_state.mainnet_chain_id)
         .to_owned();
 
-        let Some(stake_amount_encoded) =
-            call_tx_with_retries(&app_state.http_rpc_urls, rpc_api_keys, stake_at_txn).await
+        let Some(stake_amount_encoded) = call_tx_with_retries(
+            &app_state.http_rpc_urls,
+            rpc_api_keys,
+            stake_at_txn,
+            block_number,
+        )
+        .await
         else {
             return Err(anyhow!("Failed to fetch the stake amount"));
         };
@@ -390,6 +433,7 @@ async fn call_tx_with_retries(
     http_rpc_urls: &Vec<String>,
     rpc_api_keys: &Vec<String>,
     txn: TypedTransaction,
+    block_number: Option<usize>,
 ) -> Option<Bytes> {
     for rpc_url in http_rpc_urls.iter() {
         for api_key in rpc_api_keys.iter() {
@@ -404,7 +448,11 @@ async fn call_tx_with_retries(
 
             let txn_result = Retry::spawn(
                 ExponentialBackoff::from_millis(5).map(jitter).take(3),
-                || async { http_rpc_client.call(&txn, None).await },
+                || async {
+                    http_rpc_client
+                        .call(&txn, block_number.map(|num| (num as u64).into()))
+                        .await
+                },
             )
             .await;
             let Ok(txn_result) = txn_result else {

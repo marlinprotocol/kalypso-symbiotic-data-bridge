@@ -27,8 +27,12 @@ async fn read_and_sign_stakes(
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
-    let vaults_list =
-        get_vaults_addresses(&sign_stake_request.rpc_api_keys, app_state.clone()).await;
+    let vaults_list = get_vaults_addresses(
+        &sign_stake_request.rpc_api_keys,
+        sign_stake_request.block_number,
+        app_state.clone(),
+    )
+    .await;
     let Ok(vaults_list) = vaults_list else {
         return HttpResponse::InternalServerError().body(format!(
             "Failed to fetch the vaults address list for reading stakes: {:?}\n",
@@ -48,6 +52,7 @@ async fn read_and_sign_stakes(
             vault,
             sign_stake_request.capture_timestamp,
             &sign_stake_request.rpc_api_keys,
+            sign_stake_request.block_number,
             app_state.clone(),
         )
         .await;

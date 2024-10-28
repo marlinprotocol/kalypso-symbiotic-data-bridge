@@ -98,7 +98,7 @@ pub async fn get_stakes_data_for_vault(
 
     let delegator_txn = generate_txn(
         vault.clone(),
-        &app_state.vault_storage_abi,
+        &app_state.vault_abi,
         &ViewTxnMetadata {
             txn_type: ViewTxnType::Delegator,
             entity_data: None,

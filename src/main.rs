@@ -59,8 +59,6 @@ async fn main() -> Result<()> {
             .context("Failed to deserialize 'KalypsoMiddleware' contract ABI")?,
         vault_abi: load_abi_from_json(include_str!("../IVault.json"))
             .context("Failed to deserialize 'IVault' contract ABI")?,
-        vault_storage_abi: load_abi_from_json(include_str!("../IVaultStorage.json"))
-            .context("Failed to deserialize 'IVaultStorage' contract ABI")?,
         base_delegator_abi: load_abi_from_json(include_str!("../IBaseDelegator.json"))
             .context("Failed to deserialize 'IBaseDelegator' contract ABI")?,
         opt_in_service_abi: load_abi_from_json(include_str!("../IOptInService.json"))

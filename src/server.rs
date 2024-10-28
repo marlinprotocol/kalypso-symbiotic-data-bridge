@@ -1,4 +1,4 @@
-use actix_web::web::{Bytes, Data, Json};
+use actix_web::web::{Data, Json};
 use actix_web::{get, post, HttpResponse, Responder};
 use ethers::abi::{encode, Token};
 use ethers::utils::keccak256;
@@ -6,7 +6,7 @@ use k256::elliptic_curve::generic_array::sequence::Lengthen;
 use serde_json::json;
 
 use crate::contract_calls::{get_stakes_data_for_vault, get_vaults_addresses};
-use crate::utils::{AppState, SignStakeRequest, VaultSnapshot};
+use crate::utils::{AppState, SignStakeRequest, SignedData, VaultSnapshot};
 
 #[get("/")]
 async fn index() -> impl Responder {
@@ -81,7 +81,7 @@ async fn read_and_sign_stakes(
     let num_of_txns = (vault_snapshot_tokens.len() + sign_stake_request.stakes_txn_size - 1)
         / sign_stake_request.stakes_txn_size;
 
-    let mut signed_data: Vec<(Bytes, Bytes)> = Vec::new();
+    let mut signed_data: Vec<SignedData> = Vec::new();
     for tx_index in 0..num_of_txns {
         let tx_snapshot_tokens: Vec<Token> = vault_snapshot_tokens
             .drain(
@@ -107,12 +107,15 @@ async fn read_and_sign_stakes(
         };
         let signature = rs.to_bytes().append(27 + v.to_byte()).to_vec();
 
-        signed_data.push((vault_snapshot_data.into(), signature.into()));
+        signed_data.push(SignedData {
+            stake_data: format!("0x{}", hex::encode(vault_snapshot_data)),
+            signature: format!("0x{}", hex::encode(signature)),
+        });
     }
 
     HttpResponse::Ok().json(json!({
-        "noOfTxs": num_of_txns,
-        "captureTimestamp": sign_stake_request.capture_timestamp,
-        "signedData": signed_data,
+        "no_of_txs": num_of_txns,
+        "capture_timestamp": sign_stake_request.capture_timestamp,
+        "signed_data": signed_data,
     }))
 }

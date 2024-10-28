@@ -3,7 +3,7 @@ use ethers::abi::{Abi, Token};
 use ethers::types::transaction::eip2718::TypedTransaction;
 use ethers::types::{Address, Eip1559TransactionRequest, H160, H256, U256};
 use k256::ecdsa::SigningKey;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 
 pub struct ConfigManager {
@@ -29,7 +29,6 @@ pub struct AppState {
     pub kalypso_middleware_addr: Address,
     pub kalypso_middleware_abi: Abi,
     pub vault_abi: Abi,
-    pub vault_storage_abi: Abi,
     pub base_delegator_abi: Abi,
     pub opt_in_service_abi: Abi,
     pub registry_abi: Abi,
@@ -50,6 +49,12 @@ pub struct VaultSnapshot {
     pub vault: Address,
     pub stake_token: Address,
     pub stake_amount: U256,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SignedData {
+    pub stake_data: String,
+    pub signature: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,5 +148,5 @@ pub fn generate_txn(
 
 // Conversion function for H256 TxHash type to Address type
 pub fn h256_to_address(hash: H256) -> Address {
-    Address::from_slice(&hash.as_bytes()[12..]) // Extract last 20 bytes
+    Address::from_slice(&hash.as_bytes()[0..20])
 }

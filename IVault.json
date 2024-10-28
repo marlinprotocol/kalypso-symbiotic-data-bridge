@@ -11,5 +11,18 @@
             }
         ],
         "stateMutability": "view"
+    },
+    {
+        "type": "function",
+        "name": "delegator",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "stateMutability": "view"
     }
 ]

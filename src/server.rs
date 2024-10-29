@@ -97,6 +97,7 @@ async fn read_and_sign_stakes(
         let vault_snapshot_data = encode(&[Token::Array(tx_snapshot_tokens)]);
 
         let digest = keccak256(encode(&[
+            Token::FixedBytes(keccak256("STAKE_SNAPSHOT_TYPE").to_vec()),
             Token::Uint(tx_index.into()),
             Token::Uint(sign_stake_request.no_of_txs.into()),
             Token::Uint(sign_stake_request.capture_timestamp.into()),

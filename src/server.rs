@@ -20,10 +20,11 @@ async fn read_and_sign_stakes(
     app_state: Data<AppState>,
 ) -> impl Responder {
     if sign_stake_request.rpc_api_keys.is_empty() {
-        return HttpResponse::BadRequest().body("At least 1 API Key must be provided!\n");
+        return HttpResponse::BadRequest()
+            .body("At least 1 API Key (even empty) must be provided!\n");
     }
 
-    if sign_stake_request.stakes_txn_size == 0 {
+    if sign_stake_request.no_of_txs == 0 {
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
@@ -67,6 +68,13 @@ async fn read_and_sign_stakes(
         vault_snapshots.extend(snapshots);
     }
 
+    if vault_snapshots.len() < sign_stake_request.no_of_txs {
+        return HttpResponse::BadRequest().body(format!(
+            "Number of stakes found {} is less than the number of txns expected!\n",
+            vault_snapshots.len()
+        ));
+    }
+
     let mut vault_snapshot_tokens: Vec<Token> = vault_snapshots
         .into_iter()
         .map(|snapshot| {
@@ -78,23 +86,19 @@ async fn read_and_sign_stakes(
             ])
         })
         .collect();
-    let num_of_txns = (vault_snapshot_tokens.len() + sign_stake_request.stakes_txn_size - 1)
-        / sign_stake_request.stakes_txn_size;
+    let stakes_data_size = (vault_snapshot_tokens.len() + sign_stake_request.no_of_txs - 1)
+        / sign_stake_request.no_of_txs;
 
     let mut signed_data: Vec<SignedData> = Vec::new();
-    for tx_index in 0..num_of_txns {
+    for tx_index in 0..sign_stake_request.no_of_txs {
         let tx_snapshot_tokens: Vec<Token> = vault_snapshot_tokens
-            .drain(
-                0..sign_stake_request
-                    .stakes_txn_size
-                    .min(vault_snapshot_tokens.len()),
-            )
+            .drain(0..stakes_data_size.min(vault_snapshot_tokens.len()))
             .collect();
         let vault_snapshot_data = encode(&[Token::Array(tx_snapshot_tokens)]);
 
         let digest = keccak256(encode(&[
             Token::Uint(tx_index.into()),
-            Token::Uint(num_of_txns.into()),
+            Token::Uint(sign_stake_request.no_of_txs.into()),
             Token::Uint(sign_stake_request.capture_timestamp.into()),
             Token::Bytes(vault_snapshot_data.clone()),
         ]));
@@ -114,7 +118,7 @@ async fn read_and_sign_stakes(
     }
 
     HttpResponse::Ok().json(json!({
-        "no_of_txs": num_of_txns,
+        "no_of_txs": sign_stake_request.no_of_txs,
         "capture_timestamp": sign_stake_request.capture_timestamp,
         "signed_data": signed_data,
     }))

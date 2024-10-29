@@ -7,10 +7,9 @@ use ethers::types::{Address, Bytes, H160, U256};
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use crate::utils::{
-    generate_txn, h256_to_address, AppState, VaultSnapshot, ViewTxnMetadata, ViewTxnType,
-};
+use crate::utils::{generate_txn, h256_to_address, AppState, VaultSnapshot, ViewTxnData};
 
+// TODO: Get the vault addresses one-by-one by iterating over 'getNoOfVaults' and fetching 'vaults(index)'
 pub async fn get_vaults_addresses(
     rpc_api_keys: &Vec<String>,
     block_number: Option<usize>,
@@ -19,12 +18,7 @@ pub async fn get_vaults_addresses(
     let get_vaults_txn = generate_txn(
         app_state.kalypso_middleware_addr,
         &app_state.kalypso_middleware_abi,
-        &ViewTxnMetadata {
-            txn_type: ViewTxnType::GetVaults,
-            entity_data: None,
-            is_opted_in_data: None,
-            stake_at_data: None,
-        },
+        &ViewTxnData::GetVaults,
     )
     .context("Failed to generate transaction to retrieve vault addresses")?
     .set_chain_id(app_state.mainnet_chain_id)
@@ -67,12 +61,7 @@ pub async fn get_stakes_data_for_vault(
     let collateral_txn = generate_txn(
         vault.clone(),
         &app_state.vault_abi,
-        &ViewTxnMetadata {
-            txn_type: ViewTxnType::Collateral,
-            entity_data: None,
-            is_opted_in_data: None,
-            stake_at_data: None,
-        },
+        &ViewTxnData::Collateral,
     )
     .context("Failed to generate transaction for vault collateral")?
     .set_chain_id(app_state.mainnet_chain_id)
@@ -96,19 +85,10 @@ pub async fn get_stakes_data_for_vault(
         return Err(anyhow!("Failed to decode the stakeToken"));
     };
 
-    let delegator_txn = generate_txn(
-        vault.clone(),
-        &app_state.vault_abi,
-        &ViewTxnMetadata {
-            txn_type: ViewTxnType::Delegator,
-            entity_data: None,
-            is_opted_in_data: None,
-            stake_at_data: None,
-        },
-    )
-    .context("Failed to generate transaction for vault delegator")?
-    .set_chain_id(app_state.mainnet_chain_id)
-    .to_owned();
+    let delegator_txn = generate_txn(vault.clone(), &app_state.vault_abi, &ViewTxnData::Delegator)
+        .context("Failed to generate transaction for vault delegator")?
+        .set_chain_id(app_state.mainnet_chain_id)
+        .to_owned();
 
     let Some(delegator_encoded) = call_tx_with_retries(
         &app_state.http_rpc_urls,
@@ -131,12 +111,7 @@ pub async fn get_stakes_data_for_vault(
     let operator_vault_opt_in_txn = generate_txn(
         delegator.clone(),
         &app_state.base_delegator_abi,
-        &ViewTxnMetadata {
-            txn_type: ViewTxnType::OperatorVaultOptInService,
-            entity_data: None,
-            is_opted_in_data: None,
-            stake_at_data: None,
-        },
+        &ViewTxnData::OperatorVaultOptInService,
     )
     .context("Failed to generate transaction for operator vault opt in service")?
     .set_chain_id(app_state.mainnet_chain_id)
@@ -168,12 +143,7 @@ pub async fn get_stakes_data_for_vault(
     let operator_network_opt_in_txn = generate_txn(
         delegator.clone(),
         &app_state.base_delegator_abi,
-        &ViewTxnMetadata {
-            txn_type: ViewTxnType::OperatorNetworkOptInService,
-            entity_data: None,
-            is_opted_in_data: None,
-            stake_at_data: None,
-        },
+        &ViewTxnData::OperatorNetworkOptInService,
     )
     .context("Failed to generate transaction for operator network opt in service")?
     .set_chain_id(app_state.mainnet_chain_id)
@@ -205,12 +175,7 @@ pub async fn get_stakes_data_for_vault(
     let who_registry_txn = generate_txn(
         operator_vault_opt_in_service.clone(),
         &app_state.opt_in_service_abi,
-        &ViewTxnMetadata {
-            txn_type: ViewTxnType::WhoRegistry,
-            entity_data: None,
-            is_opted_in_data: None,
-            stake_at_data: None,
-        },
+        &ViewTxnData::WhoRegistry,
     )
     .context("Failed to generate transaction for operator registry")?
     .set_chain_id(app_state.mainnet_chain_id)
@@ -237,12 +202,7 @@ pub async fn get_stakes_data_for_vault(
     let operator_entities_txn = generate_txn(
         operator_registry.clone(),
         &app_state.registry_abi,
-        &ViewTxnMetadata {
-            txn_type: ViewTxnType::TotalEntities,
-            entity_data: None,
-            is_opted_in_data: None,
-            stake_at_data: None,
-        },
+        &ViewTxnData::TotalEntities,
     )
     .context("Failed to generate transaction for operator total entities")?
     .set_chain_id(app_state.mainnet_chain_id)
@@ -272,12 +232,7 @@ pub async fn get_stakes_data_for_vault(
         let operator_address_txn = generate_txn(
             operator_registry.clone(),
             &app_state.registry_abi,
-            &ViewTxnMetadata {
-                txn_type: ViewTxnType::Entity,
-                entity_data: Some(operator_ind),
-                is_opted_in_data: None,
-                stake_at_data: None,
-            },
+            &ViewTxnData::Entity(operator_ind),
         )
         .context("Failed to generate transaction for operator entity address")?
         .set_chain_id(app_state.mainnet_chain_id)
@@ -310,12 +265,7 @@ pub async fn get_stakes_data_for_vault(
         let opted_in_vault_txn = generate_txn(
             operator_vault_opt_in_service.clone(),
             &app_state.opt_in_service_abi,
-            &ViewTxnMetadata {
-                txn_type: ViewTxnType::IsOptedIn,
-                entity_data: None,
-                is_opted_in_data: Some((operator.clone(), vault.clone())),
-                stake_at_data: None,
-            },
+            &ViewTxnData::IsOptedIn(operator.clone(), vault.clone()),
         )
         .context("Failed to generate transaction for is operator opted in vault")?
         .set_chain_id(app_state.mainnet_chain_id)
@@ -346,15 +296,10 @@ pub async fn get_stakes_data_for_vault(
         let opted_in_network_txn = generate_txn(
             operator_network_opt_in_service.clone(),
             &app_state.opt_in_service_abi,
-            &ViewTxnMetadata {
-                txn_type: ViewTxnType::IsOptedIn,
-                entity_data: None,
-                is_opted_in_data: Some((
-                    operator.clone(),
-                    h256_to_address(app_state.kalypso_subnetwork),
-                )),
-                stake_at_data: None,
-            },
+            &ViewTxnData::IsOptedIn(
+                operator.clone(),
+                h256_to_address(app_state.kalypso_subnetwork),
+            ),
         )
         .context("Failed to generate transaction for is operator opted in network")?
         .set_chain_id(app_state.mainnet_chain_id)
@@ -385,16 +330,11 @@ pub async fn get_stakes_data_for_vault(
         let stake_at_txn = generate_txn(
             delegator.clone(),
             &app_state.base_delegator_abi,
-            &ViewTxnMetadata {
-                txn_type: ViewTxnType::StakeAt,
-                entity_data: None,
-                is_opted_in_data: None,
-                stake_at_data: Some((
-                    app_state.kalypso_subnetwork,
-                    operator.clone(),
-                    capture_timestamp,
-                )),
-            },
+            &ViewTxnData::StakeAt(
+                app_state.kalypso_subnetwork,
+                operator.clone(),
+                capture_timestamp,
+            ),
         )
         .context("Failed to generate transaction for stake at")?
         .set_chain_id(app_state.mainnet_chain_id)

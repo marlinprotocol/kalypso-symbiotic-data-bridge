@@ -1,12 +1,10 @@
 use actix_web::web::{Data, Json};
 use actix_web::{get, post, HttpResponse, Responder};
-use ethers::abi::{encode, Token};
-use ethers::utils::keccak256;
-use k256::elliptic_curve::generic_array::sequence::Lengthen;
 use serde_json::json;
 
 use crate::contract_calls::{get_stakes_data_for_vault, get_vaults_addresses};
-use crate::utils::{AppState, SignStakeRequest, SignedData, VaultSnapshot};
+use crate::signing::sign_vault_snapshots;
+use crate::utils::{AppState, SignStakeRequest, VaultSnapshot};
 
 #[get("/")]
 async fn index() -> impl Responder {
@@ -75,48 +73,18 @@ async fn read_and_sign_stakes(
         ));
     }
 
-    let mut vault_snapshot_tokens: Vec<Token> = vault_snapshots
-        .into_iter()
-        .map(|snapshot| {
-            Token::Tuple(vec![
-                Token::Address(snapshot.operator),
-                Token::Address(snapshot.vault),
-                Token::Address(snapshot.stake_token),
-                Token::Uint(snapshot.stake_amount),
-            ])
-        })
-        .collect();
-    let stakes_data_size = (vault_snapshot_tokens.len() + sign_stake_request.no_of_txs - 1)
-        / sign_stake_request.no_of_txs;
-
-    let mut signed_data: Vec<SignedData> = Vec::new();
-    for tx_index in 0..sign_stake_request.no_of_txs {
-        let tx_snapshot_tokens: Vec<Token> = vault_snapshot_tokens
-            .drain(0..stakes_data_size.min(vault_snapshot_tokens.len()))
-            .collect();
-        let vault_snapshot_data = encode(&[Token::Array(tx_snapshot_tokens)]);
-
-        let digest = keccak256(encode(&[
-            Token::FixedBytes(keccak256("STAKE_SNAPSHOT_TYPE").to_vec()),
-            Token::Uint(tx_index.into()),
-            Token::Uint(sign_stake_request.no_of_txs.into()),
-            Token::Uint(sign_stake_request.capture_timestamp.into()),
-            Token::Bytes(vault_snapshot_data.clone()),
-        ]));
-        let sig = app_state.enclave_signer.sign_prehash_recoverable(&digest);
-        let Ok((rs, v)) = sig else {
-            return HttpResponse::InternalServerError().body(format!(
-                "Failed to sign the stakes data message using enclave key: {:?}\n",
-                sig.unwrap_err()
-            ));
-        };
-        let signature = rs.to_bytes().append(27 + v.to_byte()).to_vec();
-
-        signed_data.push(SignedData {
-            stake_data: format!("0x{}", hex::encode(vault_snapshot_data)),
-            signature: format!("0x{}", hex::encode(signature)),
-        });
-    }
+    let signed_data = sign_vault_snapshots(
+        vault_snapshots,
+        sign_stake_request.no_of_txs,
+        sign_stake_request.capture_timestamp,
+        &app_state.enclave_signer,
+    );
+    let Ok(signed_data) = signed_data else {
+        return HttpResponse::InternalServerError().body(format!(
+            "Failed to sign the stakes data message using enclave key: {:?}\n",
+            signed_data.unwrap_err()
+        ));
+    };
 
     HttpResponse::Ok().json(json!({
         "no_of_txs": sign_stake_request.no_of_txs,

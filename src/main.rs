@@ -1,6 +1,7 @@
 mod config;
 mod contract_calls;
 mod server;
+mod signing;
 mod utils;
 
 use actix_web::web::Data;

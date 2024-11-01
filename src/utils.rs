@@ -36,7 +36,7 @@ pub struct AppState {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SignStakeRequest {
+pub struct SignRequest {
     pub rpc_api_keys: Vec<String>,
     pub no_of_txs: usize,
     pub capture_timestamp: usize,
@@ -51,9 +51,16 @@ pub struct VaultSnapshot {
     pub stake_amount: U256,
 }
 
+#[derive(Debug, Clone)]
+pub struct JobSlashed {
+    pub job_id: U256,
+    pub operator: Address,
+    pub reward_address: Address,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SignedData {
-    pub stake_data: String,
+    pub data: String,
     pub signature: String,
 }
 

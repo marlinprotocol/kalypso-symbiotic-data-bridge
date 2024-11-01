@@ -75,6 +75,7 @@ async fn main() -> Result<()> {
             .app_data(app_data.clone())
             .service(index)
             .service(read_and_sign_stakes)
+            .service(read_and_sign_slashes)
     })
     .bind(("0.0.0.0", args.port))
     .context(format!("Could not bind to port {}", args.port))?

@@ -2,9 +2,11 @@ use actix_web::web::{Data, Json};
 use actix_web::{get, post, HttpResponse, Responder};
 use serde_json::json;
 
-use crate::contract_calls::{get_stakes_data_for_vault, get_vaults_addresses};
+use crate::contract_calls::{
+    get_slash_data_for_vault, get_stakes_data_for_vault, get_vaults_addresses,
+};
 use crate::signing::{sign_slash_results, sign_vault_snapshots};
-use crate::utils::{AppState, JobSlashed, SignRequest, VaultSnapshot};
+use crate::utils::{AppState, JobSlashed, SignSlashRequest, SignStakeRequest, VaultSnapshot};
 
 #[get("/")]
 async fn index() -> impl Responder {
@@ -14,7 +16,7 @@ async fn index() -> impl Responder {
 #[post("/sign-stake-data")]
 // Endpoint exposed to read stakes data from symbiotic vaults and sign them
 async fn read_and_sign_stakes(
-    Json(sign_stake_request): Json<SignRequest>,
+    Json(sign_stake_request): Json<SignStakeRequest>,
     app_state: Data<AppState>,
 ) -> impl Responder {
     if sign_stake_request.rpc_api_keys.is_empty() {
@@ -96,7 +98,7 @@ async fn read_and_sign_stakes(
 #[post("/sign-slash-data")]
 // Endpoint exposed to read slash data from symbiotic vaults and sign them
 async fn read_and_sign_slashes(
-    Json(sign_slash_request): Json<SignRequest>,
+    Json(sign_slash_request): Json<SignSlashRequest>,
     app_state: Data<AppState>,
 ) -> impl Responder {
     if sign_slash_request.rpc_api_keys.is_empty() {
@@ -108,52 +110,54 @@ async fn read_and_sign_slashes(
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
-    // let vaults_list = get_vaults_addresses(
-    //     &sign_slash_request.rpc_api_keys,
-    //     sign_slash_request.block_number,
-    //     app_state.clone(),
-    // )
-    // .await;
-    // let Ok(vaults_list) = vaults_list else {
-    //     return HttpResponse::InternalServerError().body(format!(
-    //         "Failed to fetch the vaults address list for reading slashes: {:?}\n",
-    //         vaults_list.unwrap_err()
-    //     ));
-    // };
+    let vaults_list = get_vaults_addresses(
+        &sign_slash_request.rpc_api_keys,
+        sign_slash_request.to_block_number,
+        app_state.clone(),
+    )
+    .await;
+    let Ok(vaults_list) = vaults_list else {
+        return HttpResponse::InternalServerError().body(format!(
+            "Failed to fetch the vaults address list for reading slashes: {:?}\n",
+            vaults_list.unwrap_err()
+        ));
+    };
 
-    // if vaults_list.is_empty() {
-    //     return HttpResponse::BadRequest()
-    //         .body("No vaults found associated with the kalypso network!\n");
-    // }
+    if vaults_list.is_empty() {
+        return HttpResponse::BadRequest()
+            .body("No vaults found associated with the kalypso network!\n");
+    }
 
-    let slash_results: Vec<JobSlashed> = Vec::new();
+    let mut slash_results: Vec<JobSlashed> = Vec::new();
 
-    // for vault in vaults_list.iter() {
-    //     let snapshots = get_slash_data_for_vault(
-    //         vault,
-    //         sign_slash_request.capture_timestamp,
-    //         &sign_slash_request.rpc_api_keys,
-    //         sign_slash_request.block_number,
-    //         app_state.clone(),
-    //     )
-    //     .await;
-    //     let Ok(snapshots) = snapshots else {
-    //         return HttpResponse::InternalServerError().body(format!(
-    //             "Failed to retrieve slash data for vault {:?} from the RPC: {:?}\n",
-    //             vault,
-    //             snapshots.unwrap_err()
-    //         ));
-    //     };
+    for vault in vaults_list.iter() {
+        let snapshots = get_slash_data_for_vault(
+            vault.to_owned(),
+            sign_slash_request.capture_timestamp,
+            sign_slash_request.last_capture_timestamp,
+            &sign_slash_request.rpc_api_keys,
+            sign_slash_request.from_block_number,
+            sign_slash_request.to_block_number,
+            app_state.clone(),
+        )
+        .await;
+        let Ok(snapshots) = snapshots else {
+            return HttpResponse::InternalServerError().body(format!(
+                "Failed to retrieve slash data for vault {:?} from the RPC: {:?}\n",
+                vault,
+                snapshots.unwrap_err()
+            ));
+        };
 
-    //     slash_results.extend(snapshots);
-    // }
+        slash_results.extend(snapshots);
+    }
 
-    // if slash_results.len() < sign_slash_request.no_of_txs {
-    //     return HttpResponse::BadRequest().body(format!(
-    //         "Number of slashes found {} is less than the number of txns expected!\n",
-    //         slash_results.len()
-    //     ));
-    // }
+    if slash_results.len() < sign_slash_request.no_of_txs {
+        return HttpResponse::BadRequest().body(format!(
+            "Number of slashes found {} is less than the number of txns expected!\n",
+            slash_results.len()
+        ));
+    }
 
     let signed_data = sign_slash_results(
         slash_results,

@@ -6,6 +6,10 @@ use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 
+// Average Ethereum block time in seconds (adjust this value as needed)
+pub const AVERAGE_BLOCK_TIME: u64 = 12;
+pub const BLOCK_ESTIMATION_BUFFER: u64 = 10_000;
+
 pub struct ConfigManager {
     pub path: String,
 }
@@ -36,11 +40,21 @@ pub struct AppState {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SignRequest {
+pub struct SignStakeRequest {
     pub rpc_api_keys: Vec<String>,
     pub no_of_txs: usize,
     pub capture_timestamp: usize,
     pub block_number: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SignSlashRequest {
+    pub rpc_api_keys: Vec<String>,
+    pub no_of_txs: usize,
+    pub capture_timestamp: usize,
+    pub last_capture_timestamp: usize,
+    pub from_block_number: Option<usize>,
+    pub to_block_number: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +83,7 @@ pub enum ViewTxnData {
     GetVaults,
     Collateral,
     Delegator,
+    Slasher,
     OperatorVaultOptInService,
     OperatorNetworkOptInService,
     StakeAt(H256, Address, usize),
@@ -84,6 +99,7 @@ impl ViewTxnData {
             ViewTxnData::GetVaults => "getVaults",
             ViewTxnData::Collateral => "collateral",
             ViewTxnData::Delegator => "delegator",
+            ViewTxnData::Slasher => "slasher",
             ViewTxnData::OperatorVaultOptInService => "OPERATOR_VAULT_OPT_IN_SERVICE",
             ViewTxnData::OperatorNetworkOptInService => "OPERATOR_NETWORK_OPT_IN_SERVICE",
             ViewTxnData::StakeAt(_, _, _) => "stakeAt",
@@ -113,6 +129,7 @@ pub fn generate_txn(
         ViewTxnData::GetVaults
         | ViewTxnData::Collateral
         | ViewTxnData::Delegator
+        | ViewTxnData::Slasher
         | ViewTxnData::OperatorVaultOptInService
         | ViewTxnData::OperatorNetworkOptInService
         | ViewTxnData::WhoRegistry

@@ -1,10 +1,10 @@
 {
-    "mainnet_chain_id": 17000,
+    "chain_id": 17000,
     "kalypso_subnetwork": "0xa2024540267e3366b1d3381285dd11a1b45928df000000000000000000000000",
     "http_rpc_urls": [
         "https://ethereum-holesky-rpc.publicnode.com",
-        "https://ethereum-holesky.blockpi.network/v1/rpc/public",
-        "https://1rpc.io/holesky"
+        "https://holesky.infura.io/v3",
+        "https://eth-holesky.g.alchemy.com/v2"
     ],
     "kalypso_middleware_addr": "0xe43EFeA7f40a885f4B35a149CAB5FC3fE01564C6",
     "enclave_signer_file": "/app/ecdsa.sec"

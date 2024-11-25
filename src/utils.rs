@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 use ethers::abi::{Abi, Token};
 use ethers::types::transaction::eip2718::TypedTransaction;
@@ -6,9 +8,9 @@ use k256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use serde_json::from_str;
 
-// Average Ethereum block time in seconds (adjust this value as needed)
-pub const AVERAGE_BLOCK_TIME: u64 = 12;
-pub const BLOCK_ESTIMATION_BUFFER: u64 = 10_000;
+pub const MIN_NUMBER_OF_RPC_RESPONSES: usize = 1;
+pub const LATEST_BLOCK_MAX_VALIDITY: u64 = 60; // in seconds
+pub const LATEST_BLOCK_ESTIMATION_BUFFER: u64 = 35;
 
 pub struct ConfigManager {
     pub path: String,
@@ -17,9 +19,9 @@ pub struct ConfigManager {
 // Config struct containing the data bridge configuration parameters
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub mainnet_chain_id: u64,
+    pub chain_id: u64,
     pub kalypso_subnetwork: H256,
-    pub http_rpc_urls: Vec<String>,
+    pub http_rpc_urls: HashSet<String>,
     pub kalypso_middleware_addr: Address,
     pub enclave_signer_file: String,
 }
@@ -27,9 +29,9 @@ pub struct Config {
 // App data struct containing the necessary fields to run the data bridge
 #[derive(Debug)]
 pub struct AppState {
-    pub mainnet_chain_id: u64,
+    pub chain_id: u64,
     pub kalypso_subnetwork: H256,
-    pub http_rpc_urls: Vec<String>,
+    pub http_rpc_urls: HashSet<String>,
     pub kalypso_middleware_addr: Address,
     pub kalypso_middleware_abi: Abi,
     pub vault_abi: Abi,
@@ -43,18 +45,15 @@ pub struct AppState {
 pub struct SignStakeRequest {
     pub rpc_api_keys: Vec<String>,
     pub no_of_txs: usize,
-    pub capture_timestamp: usize,
-    pub block_number: Option<usize>,
+    pub block_number: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SignSlashRequest {
     pub rpc_api_keys: Vec<String>,
     pub no_of_txs: usize,
-    pub capture_timestamp: usize,
-    pub last_capture_timestamp: usize,
-    pub from_block_number: Option<usize>,
-    pub to_block_number: Option<usize>,
+    pub from_block_number: u64,
+    pub to_block_number: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +85,7 @@ pub enum ViewTxnData {
     Slasher,
     OperatorVaultOptInService,
     OperatorNetworkOptInService,
-    StakeAt(H256, Address, usize),
+    StakeAt(H256, Address, u64),
     WhoRegistry,
     IsOptedIn(Address, Address),
     TotalEntities,
@@ -120,7 +119,7 @@ pub fn load_abi_from_json(json_abi: &str) -> Result<Abi> {
 pub fn generate_txn(
     contract_addr: H160,
     contract_abi: &Abi,
-    view_txn_data: &ViewTxnData,
+    view_txn_data: ViewTxnData,
 ) -> Result<TypedTransaction> {
     // Get the encoding 'Function' object for the transaction type
     let function = contract_abi.function(view_txn_data.as_str())?;

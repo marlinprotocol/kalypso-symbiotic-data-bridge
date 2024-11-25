@@ -1,12 +1,18 @@
+use std::cmp;
+use std::collections::HashMap;
+
 use actix_web::web::{Data, Json};
 use actix_web::{get, post, HttpResponse, Responder};
 use serde_json::json;
 
 use crate::contract_calls::{
-    get_slash_data_for_vault, get_stakes_data_for_vault, get_vaults_addresses,
+    get_block_number_and_timestamps, get_stakes_data_for_vault, get_vaults_addresses,
 };
 use crate::signing::{sign_slash_results, sign_vault_snapshots};
-use crate::utils::{AppState, JobSlashed, SignSlashRequest, SignStakeRequest, VaultSnapshot};
+use crate::utils::{
+    AppState, JobSlashed, SignSlashRequest, SignStakeRequest, VaultSnapshot,
+    MIN_NUMBER_OF_RPC_RESPONSES,
+};
 
 #[get("/")]
 async fn index() -> impl Responder {
@@ -28,9 +34,19 @@ async fn read_and_sign_stakes(
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
-    let vaults_list = get_vaults_addresses(
-        &sign_stake_request.rpc_api_keys,
+    let rpc_block_map: HashMap<String, (u64, u64)> = get_block_number_and_timestamps(
+        app_state.http_rpc_urls.clone(),
+        sign_stake_request.rpc_api_keys.clone().into(),
         sign_stake_request.block_number,
+    )
+    .await;
+    if rpc_block_map.len() < MIN_NUMBER_OF_RPC_RESPONSES {
+        return HttpResponse::InternalServerError().body("Rpc Server Error!/n");
+    }
+
+    let vaults_list = get_vaults_addresses(
+        sign_stake_request.rpc_api_keys.clone().into(),
+        rpc_block_map.clone(),
         app_state.clone(),
     )
     .await;
@@ -51,9 +67,8 @@ async fn read_and_sign_stakes(
     for vault in vaults_list.iter() {
         let snapshots = get_stakes_data_for_vault(
             vault,
-            sign_stake_request.capture_timestamp,
-            &sign_stake_request.rpc_api_keys,
-            sign_stake_request.block_number,
+            sign_stake_request.rpc_api_keys.clone().into(),
+            rpc_block_map.clone(),
             app_state.clone(),
         )
         .await;
@@ -75,10 +90,15 @@ async fn read_and_sign_stakes(
         ));
     }
 
+    let mut capture_timestamp = 0;
+    for (_, timestamp) in rpc_block_map.values() {
+        capture_timestamp = cmp::max(capture_timestamp, timestamp.clone());
+    }
+
     let signed_data = sign_vault_snapshots(
         vault_snapshots,
         sign_stake_request.no_of_txs,
-        sign_stake_request.capture_timestamp,
+        capture_timestamp,
         &app_state.enclave_signer,
     );
     let Ok(signed_data) = signed_data else {
@@ -90,7 +110,7 @@ async fn read_and_sign_stakes(
 
     HttpResponse::Ok().json(json!({
         "no_of_txs": sign_stake_request.no_of_txs,
-        "capture_timestamp": sign_stake_request.capture_timestamp,
+        "capture_timestamp": capture_timestamp,
         "signed_data": signed_data,
     }))
 }
@@ -110,59 +130,69 @@ async fn read_and_sign_slashes(
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
-    let vaults_list = get_vaults_addresses(
-        &sign_slash_request.rpc_api_keys,
+    let rpc_block_map: HashMap<String, (u64, u64)> = get_block_number_and_timestamps(
+        app_state.http_rpc_urls.clone(),
+        sign_slash_request.rpc_api_keys.into(),
         sign_slash_request.to_block_number,
-        app_state.clone(),
     )
     .await;
-    let Ok(vaults_list) = vaults_list else {
-        return HttpResponse::InternalServerError().body(format!(
-            "Failed to fetch the vaults address list for reading slashes: {:?}\n",
-            vaults_list.unwrap_err()
-        ));
-    };
-
-    if vaults_list.is_empty() {
-        return HttpResponse::BadRequest()
-            .body("No vaults found associated with the kalypso network!\n");
+    if rpc_block_map.len() < MIN_NUMBER_OF_RPC_RESPONSES {
+        return HttpResponse::InternalServerError().body("Rpc Server Error!/n");
     }
 
-    let mut slash_results: Vec<JobSlashed> = Vec::new();
+    // let vaults_list = get_vaults_addresses(
+    //     sign_slash_request.rpc_api_keys.clone().into(),
+    //     rpc_block_map.clone(),
+    //     app_state.clone(),
+    // )
+    // .await;
+    // let Ok(vaults_list) = vaults_list else {
+    //     return HttpResponse::InternalServerError().body(format!(
+    //         "Failed to fetch the vaults address list for reading slashes: {:?}\n",
+    //         vaults_list.unwrap_err()
+    //     ));
+    // };
 
-    for vault in vaults_list.iter() {
-        let snapshots = get_slash_data_for_vault(
-            vault.to_owned(),
-            sign_slash_request.capture_timestamp,
-            sign_slash_request.last_capture_timestamp,
-            &sign_slash_request.rpc_api_keys,
-            sign_slash_request.from_block_number,
-            sign_slash_request.to_block_number,
-            app_state.clone(),
-        )
-        .await;
-        let Ok(snapshots) = snapshots else {
-            return HttpResponse::InternalServerError().body(format!(
-                "Failed to retrieve slash data for vault {:?} from the RPC: {:?}\n",
-                vault,
-                snapshots.unwrap_err()
-            ));
-        };
+    let slash_results: Vec<JobSlashed> = Vec::new();
 
-        slash_results.extend(snapshots);
-    }
+    // for vault in vaults_list.iter() {
+    //     let snapshots = get_slash_data_for_vault(
+    //         vault.to_owned(),
+    //         sign_slash_request.capture_timestamp,
+    //         sign_slash_request.last_capture_timestamp,
+    //         &sign_slash_request.rpc_api_keys,
+    //         sign_slash_request.from_block_number,
+    //         sign_slash_request.to_block_number,
+    //         app_state.clone(),
+    //     )
+    //     .await;
+    //     let Ok(snapshots) = snapshots else {
+    //         return HttpResponse::InternalServerError().body(format!(
+    //             "Failed to retrieve slash data for vault {:?} from the RPC: {:?}\n",
+    //             vault,
+    //             snapshots.unwrap_err()
+    //         ));
+    //     };
 
-    if slash_results.len() < sign_slash_request.no_of_txs {
-        return HttpResponse::BadRequest().body(format!(
-            "Number of slashes found {} is less than the number of txns expected!\n",
-            slash_results.len()
-        ));
+    //     slash_results.extend(snapshots);
+    // }
+
+    // if slash_results.len() < sign_slash_request.no_of_txs {
+    //     return HttpResponse::BadRequest().body(format!(
+    //         "Number of slashes found {} is less than the number of txns expected!\n",
+    //         slash_results.len()
+    //     ));
+    // }
+
+    let mut capture_timestamp = 0;
+    for (_, timestamp) in rpc_block_map.values() {
+        capture_timestamp = cmp::max(capture_timestamp, timestamp.clone());
     }
 
     let signed_data = sign_slash_results(
         slash_results,
         sign_slash_request.no_of_txs,
-        sign_slash_request.capture_timestamp,
+        capture_timestamp,
         &app_state.enclave_signer,
     );
     let Ok(signed_data) = signed_data else {
@@ -174,7 +204,7 @@ async fn read_and_sign_slashes(
 
     HttpResponse::Ok().json(json!({
         "no_of_txs": sign_slash_request.no_of_txs,
-        "capture_timestamp": sign_slash_request.capture_timestamp,
+        "capture_timestamp": capture_timestamp,
         "signed_data": signed_data,
     }))
 }

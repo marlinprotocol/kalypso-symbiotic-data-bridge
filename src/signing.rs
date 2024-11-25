@@ -9,7 +9,7 @@ use crate::utils::{JobSlashed, SignedData, VaultSnapshot};
 pub fn sign_vault_snapshots(
     vault_snapshots: Vec<VaultSnapshot>,
     no_of_txs: usize,
-    capture_timestamp: usize,
+    capture_timestamp: u64,
     enclave_signer: &SigningKey,
 ) -> Result<Vec<SignedData>> {
     let vault_snapshot_tokens: Vec<Token> = vault_snapshots
@@ -36,7 +36,7 @@ pub fn sign_vault_snapshots(
 pub fn sign_slash_results(
     slash_results: Vec<JobSlashed>,
     no_of_txs: usize,
-    capture_timestamp: usize,
+    capture_timestamp: u64,
     enclave_signer: &SigningKey,
 ) -> Result<Vec<SignedData>> {
     let slash_results_tokens: Vec<Token> = slash_results
@@ -63,7 +63,7 @@ pub fn sign_data(
     tx_type: [u8; 32],
     mut data: Vec<Token>,
     no_of_txs: usize,
-    capture_timestamp: usize,
+    capture_timestamp: u64,
     enclave_signer: &SigningKey,
 ) -> Result<Vec<SignedData>> {
     let data_per_batch = data.len() / no_of_txs;
@@ -161,7 +161,7 @@ mod tests {
         let signed_data = sign_vault_snapshots(
             vault_snapshots.clone(),
             no_of_txs,
-            capture_timestamp as usize,
+            capture_timestamp,
             &signer,
         );
         assert!(signed_data.is_ok());
@@ -245,12 +245,8 @@ mod tests {
             .unwrap()
             .as_secs();
 
-        let signed_data = sign_slash_results(
-            slash_results.clone(),
-            no_of_txs,
-            capture_timestamp as usize,
-            &signer,
-        );
+        let signed_data =
+            sign_slash_results(slash_results.clone(), no_of_txs, capture_timestamp, &signer);
         assert!(signed_data.is_ok());
 
         let signed_data = signed_data.unwrap();

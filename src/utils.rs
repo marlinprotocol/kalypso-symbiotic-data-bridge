@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
 use ethers::abi::{Abi, Token};
 use ethers::types::transaction::eip2718::TypedTransaction;
@@ -21,7 +19,7 @@ pub struct ConfigManager {
 pub struct Config {
     pub chain_id: u64,
     pub kalypso_subnetwork: H256,
-    pub http_rpc_urls: HashSet<String>,
+    pub http_rpc_urls: Vec<String>,
     pub kalypso_middleware_addr: Address,
     pub enclave_signer_file: String,
 }
@@ -31,7 +29,7 @@ pub struct Config {
 pub struct AppState {
     pub chain_id: u64,
     pub kalypso_subnetwork: H256,
-    pub http_rpc_urls: HashSet<String>,
+    pub http_rpc_urls: Vec<String>,
     pub kalypso_middleware_addr: Address,
     pub kalypso_middleware_abi: Abi,
     pub vault_abi: Abi,
@@ -41,6 +39,7 @@ pub struct AppState {
     pub enclave_signer: SigningKey,
 }
 
+// Endpoint parameters required for getting the stakes data from the symbiotic contracts
 #[derive(Debug, Deserialize)]
 pub struct SignStakeRequest {
     pub rpc_api_keys: Vec<String>,
@@ -48,6 +47,7 @@ pub struct SignStakeRequest {
     pub block_number: Option<u64>,
 }
 
+// Endpoint parameters required for getting the slash data from the symbiotic contracts
 #[derive(Debug, Deserialize)]
 pub struct SignSlashRequest {
     pub rpc_api_keys: Vec<String>,
@@ -56,6 +56,7 @@ pub struct SignSlashRequest {
     pub to_block_number: Option<u64>,
 }
 
+// Vault snapshot struct submitted on the L2 'SymbioticStaking' contract
 #[derive(Debug, Clone)]
 pub struct VaultSnapshot {
     pub operator: Address,
@@ -64,6 +65,7 @@ pub struct VaultSnapshot {
     pub stake_amount: U256,
 }
 
+// Job slashed struct submitted on the L2 'SymbioticStaking' contract
 #[derive(Debug, Clone)]
 pub struct JobSlashed {
     pub job_id: U256,
@@ -71,12 +73,14 @@ pub struct JobSlashed {
     pub reward_address: Address,
 }
 
+// Signed data struct returned in the endpoint response
 #[derive(Debug, Serialize)]
 pub struct SignedData {
     pub data: String,
     pub signature: String,
 }
 
+// Enum defining the required state read methods to be called
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewTxnData {
     GetVaults,
@@ -92,6 +96,7 @@ pub enum ViewTxnData {
     Entity(U256),
 }
 
+// Enum -> Method name (on the smart contracts) mapping
 impl ViewTxnData {
     pub fn as_str(&self) -> &str {
         match &self {
@@ -110,6 +115,7 @@ impl ViewTxnData {
     }
 }
 
+// Loads contract ABI from the json representation
 pub fn load_abi_from_json(json_abi: &str) -> Result<Abi> {
     let contract: Abi = from_str(&json_abi)?;
     Ok(contract)
@@ -124,6 +130,7 @@ pub fn generate_txn(
     // Get the encoding 'Function' object for the transaction type
     let function = contract_abi.function(view_txn_data.as_str())?;
 
+    // Encode the params into token list based on the txn type
     let params = match view_txn_data {
         ViewTxnData::GetVaults
         | ViewTxnData::Collateral

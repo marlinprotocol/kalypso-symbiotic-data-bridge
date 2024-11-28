@@ -5,15 +5,14 @@ use actix_web::web::{Data, Json};
 use actix_web::{get, post, HttpResponse, Responder};
 use serde_json::json;
 
-use crate::contract_calls::{
-    get_block_number_and_timestamps, get_stakes_data_for_vault, get_vaults_addresses,
-};
-use crate::signing::{sign_slash_results, sign_vault_snapshots};
+use crate::contract_calls::*;
+use crate::signing::*;
 use crate::utils::{
     AppState, JobSlashed, SignSlashRequest, SignStakeRequest, VaultSnapshot,
     MIN_NUMBER_OF_RPC_RESPONSES,
 };
 
+// Base route indicating server is up and running
 #[get("/")]
 async fn index() -> impl Responder {
     HttpResponse::Ok()
@@ -25,38 +24,41 @@ async fn read_and_sign_stakes(
     Json(sign_stake_request): Json<SignStakeRequest>,
     app_state: Data<AppState>,
 ) -> impl Responder {
-    if sign_stake_request.rpc_api_keys.is_empty() {
-        return HttpResponse::BadRequest()
-            .body("At least 1 API Key (even empty) must be provided!\n");
+    // Check whether API keys are provided corresponding to each RPC URL configured in the enclave
+    if sign_stake_request.rpc_api_keys.len() != app_state.http_rpc_urls.len() {
+        return HttpResponse::BadRequest().body(format!(
+            "Require {} API keys corresponding to public, infura and alchemy RPCs!\n",
+            app_state.http_rpc_urls.len()
+        ));
     }
 
     if sign_stake_request.no_of_txs == 0 {
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
+    // Get the mapping from RPC URLs to their corresponding blocks and timestamps (used while making state read calls)
     let rpc_block_map: HashMap<String, (u64, u64)> = get_block_number_and_timestamps(
         app_state.http_rpc_urls.clone(),
-        sign_stake_request.rpc_api_keys.clone().into(),
+        sign_stake_request.rpc_api_keys.into(),
         sign_stake_request.block_number,
     )
     .await;
+    // Check whether a minimum number of RPCs are available to generate and validate the response
     if rpc_block_map.len() < MIN_NUMBER_OF_RPC_RESPONSES {
-        return HttpResponse::InternalServerError().body("Rpc Server Error!/n");
+        return HttpResponse::InternalServerError().body(format!(
+            "Threshold {} number of RPCs not available!\n",
+            MIN_NUMBER_OF_RPC_RESPONSES
+        ));
     }
 
-    let vaults_list = get_vaults_addresses(
-        sign_stake_request.rpc_api_keys.clone().into(),
-        rpc_block_map.clone(),
-        app_state.clone(),
-    )
-    .await;
+    // Get the lists of vaults associated with the kalypso subnetwork
+    let vaults_list = get_vaults_addresses(rpc_block_map.clone(), app_state.clone()).await;
     let Ok(vaults_list) = vaults_list else {
         return HttpResponse::InternalServerError().body(format!(
             "Failed to fetch the vaults address list for reading stakes: {:?}\n",
             vaults_list.unwrap_err()
         ));
     };
-
     if vaults_list.is_empty() {
         return HttpResponse::BadRequest()
             .body("No vaults found associated with the kalypso network!\n");
@@ -64,14 +66,10 @@ async fn read_and_sign_stakes(
 
     let mut vault_snapshots: Vec<VaultSnapshot> = Vec::new();
 
+    // Retrieve stakes data associated with each vault in the kalypso subnetwork
     for vault in vaults_list.iter() {
-        let snapshots = get_stakes_data_for_vault(
-            vault,
-            sign_stake_request.rpc_api_keys.clone().into(),
-            rpc_block_map.clone(),
-            app_state.clone(),
-        )
-        .await;
+        let snapshots =
+            get_stakes_data_for_vault(vault, rpc_block_map.clone(), app_state.clone()).await;
         let Ok(snapshots) = snapshots else {
             return HttpResponse::InternalServerError().body(format!(
                 "Failed to retrieve stakes data for vault {:?} from the RPC: {:?}\n",
@@ -90,11 +88,13 @@ async fn read_and_sign_stakes(
         ));
     }
 
+    // Calculate the capture timestamp to be used for signing and posting the data on the L2 contract
     let mut capture_timestamp = 0;
     for (_, timestamp) in rpc_block_map.values() {
         capture_timestamp = cmp::max(capture_timestamp, timestamp.clone());
     }
 
+    // Get the signed data to be submitted on-chain
     let signed_data = sign_vault_snapshots(
         vault_snapshots,
         sign_stake_request.no_of_txs,
@@ -121,15 +121,19 @@ async fn read_and_sign_slashes(
     Json(sign_slash_request): Json<SignSlashRequest>,
     app_state: Data<AppState>,
 ) -> impl Responder {
-    if sign_slash_request.rpc_api_keys.is_empty() {
-        return HttpResponse::BadRequest()
-            .body("At least 1 API Key (even empty) must be provided!\n");
+    // Check whether API keys are provided corresponding to each RPC URL configured in the enclave
+    if sign_slash_request.rpc_api_keys.len() != app_state.http_rpc_urls.len() {
+        return HttpResponse::BadRequest().body(format!(
+            "Require {} API keys corresponding to public, infura and alchemy RPCs!\n",
+            app_state.http_rpc_urls.len()
+        ));
     }
 
     if sign_slash_request.no_of_txs == 0 {
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
+    // Get the mapping from RPC URLs to their corresponding blocks and timestamps (used while making state read calls)
     let rpc_block_map: HashMap<String, (u64, u64)> = get_block_number_and_timestamps(
         app_state.http_rpc_urls.clone(),
         sign_slash_request.rpc_api_keys.into(),
@@ -184,11 +188,13 @@ async fn read_and_sign_slashes(
     //     ));
     // }
 
+    // Calculate the capture timestamp to be used for signing and posting the data on the L2 contract
     let mut capture_timestamp = 0;
     for (_, timestamp) in rpc_block_map.values() {
         capture_timestamp = cmp::max(capture_timestamp, timestamp.clone());
     }
 
+    // Get the signed data to be submitted on-chain
     let signed_data = sign_slash_results(
         slash_results,
         sign_slash_request.no_of_txs,

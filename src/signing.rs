@@ -6,12 +6,14 @@ use k256::elliptic_curve::generic_array::sequence::Lengthen;
 
 use crate::utils::{JobSlashed, SignedData, VaultSnapshot};
 
+// Method returning the signed data for the stakes info that needs to be submitted on-chain
 pub fn sign_vault_snapshots(
     vault_snapshots: Vec<VaultSnapshot>,
     no_of_txs: usize,
     capture_timestamp: u64,
     enclave_signer: &SigningKey,
 ) -> Result<Vec<SignedData>> {
+    // Encapsulate and tokenize the vault snapshot data
     let vault_snapshot_tokens: Vec<Token> = vault_snapshots
         .into_iter()
         .map(|snapshot| {
@@ -33,12 +35,14 @@ pub fn sign_vault_snapshots(
     )?)
 }
 
+// Method returning the signed data for the slash info that needs to be submitted on-chain
 pub fn sign_slash_results(
     slash_results: Vec<JobSlashed>,
     no_of_txs: usize,
     capture_timestamp: u64,
     enclave_signer: &SigningKey,
 ) -> Result<Vec<SignedData>> {
+    // Encapsulate and tokenize the slash results
     let slash_results_tokens: Vec<Token> = slash_results
         .into_iter()
         .map(|snapshot| {
@@ -59,13 +63,15 @@ pub fn sign_slash_results(
     )?)
 }
 
-pub fn sign_data(
+// Method generating the signature for the data using the enclave private key
+fn sign_data(
     tx_type: [u8; 32],
     mut data: Vec<Token>,
     no_of_txs: usize,
     capture_timestamp: u64,
     enclave_signer: &SigningKey,
 ) -> Result<Vec<SignedData>> {
+    // Estimate the number of stake/slash data to be included in a transaction
     let data_per_batch = data.len() / no_of_txs;
     let data_overhead_per_batch = data.len() % no_of_txs;
 
@@ -76,9 +82,11 @@ pub fn sign_data(
             batch_size += 1;
         }
 
+        // Gather and encode data to be put in a single transaction
         let tx_snapshot_tokens: Vec<Token> = data.drain(0..batch_size.min(data.len())).collect();
         let tx_snapshot_data = encode(&[Token::Array(tx_snapshot_tokens)]);
 
+        // Create the digest following the format used in the on-chain contracts
         let digest = keccak256(encode(&[
             Token::FixedBytes(tx_type.to_vec()),
             Token::Uint(tx_index.into()),
@@ -86,9 +94,11 @@ pub fn sign_data(
             Token::Uint(capture_timestamp.into()),
             Token::Bytes(tx_snapshot_data.clone()),
         ]));
+        // Created the prefixed digest for standard ethereum signed messages
         let prefix = format!("\x19Ethereum Signed Message:\n{}", digest.len());
         let prefixed_digest = keccak256([prefix.as_bytes(), &digest].concat());
 
+        // Sign the prefixed digest using the enclave private key
         let (rs, v) = enclave_signer.sign_prehash_recoverable(&prefixed_digest)?;
         let signature = rs.to_bytes().append(27 + v.to_byte()).to_vec();
 

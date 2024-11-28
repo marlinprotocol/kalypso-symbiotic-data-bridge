@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,28 +14,37 @@ use tokio_retry::Retry;
 
 use crate::utils::*;
 
+// Method returning the mapping from RPC URLs to their corresponding block numbers and timestamps to configure while making state read calls
 pub async fn get_block_number_and_timestamps(
-    http_rpc_urls: HashSet<String>,
+    http_rpc_urls: Vec<String>,
     rpc_api_keys: Arc<Vec<String>>,
     block_number: Option<u64>,
 ) -> HashMap<String, (u64, u64)> {
-    // Create an mpsc channel
+    // Create a mpsc channel
     let (tx, mut rx) = mpsc::channel::<(String, u64, u64)>(10);
 
-    for rpc_url in http_rpc_urls {
+    for ind in 0..http_rpc_urls.len() {
+        // Initialize the HTTP RPC URL with the corresponding API Key included
+        let http_rpc_url = format!(
+            "{}/{}",
+            http_rpc_urls.get(ind).unwrap(),
+            rpc_api_keys.get(ind).unwrap()
+        );
         let tx_clone = tx.clone();
-        let rpc_api_keys_clone = Arc::clone(&rpc_api_keys);
 
+        // Spawn task independently to retrieve the block number and timestamp for a RPC endpoint
         tokio::spawn(async move {
             let mut block_num = block_number;
 
+            // If block number is not specified, use the latest block
             if block_num.is_none() {
-                let Some(latest_block_metadata) =
-                    get_block_metadata(&rpc_url, &rpc_api_keys_clone, None).await
+                // Retrieve latest block number and timestamp for the given RPC endpoint
+                let Some(latest_block_metadata) = get_block_metadata(&http_rpc_url, None).await
                 else {
                     return;
                 };
 
+                // Check whether the latest block for the RPC is older than the max validity configured to consider it
                 if latest_block_metadata.1
                     < SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -46,23 +55,26 @@ pub async fn get_block_number_and_timestamps(
                     return;
                 }
 
+                // Initialize the block number to be considered for reading the data from this RPC based on the estimation buffer (~7 mins old)
                 block_num = Some(latest_block_metadata.0 - LATEST_BLOCK_ESTIMATION_BUFFER);
             }
 
-            let Some(block_metadata) =
-                get_block_metadata(&rpc_url, &rpc_api_keys_clone, block_num.clone()).await
+            // Fetch the relevant block number and timestamp for the given RPC endpoint
+            let Some(block_metadata) = get_block_metadata(&http_rpc_url, block_num.clone()).await
             else {
                 return;
             };
 
+            // Send this data to the receiver channel for collection
             let _ = tx_clone
-                .send((rpc_url.clone(), block_metadata.0, block_metadata.1))
+                .send((http_rpc_url, block_metadata.0, block_metadata.1))
                 .await;
         });
     }
 
     drop(tx);
 
+    // Collect the RPC -> Block metadata map through the receiver channel
     let mut rpc_block_map = HashMap::new();
     while let Some((rpc, block_num, timestamp)) = rx.recv().await {
         rpc_block_map.insert(rpc, (block_num, timestamp));
@@ -72,14 +84,14 @@ pub async fn get_block_number_and_timestamps(
 }
 
 // TODO: Get the vault addresses one-by-one by iterating over 'getNoOfVaults' and fetching 'vaults(index)'
+// Method returning the vault addresses associated with the kalypso subnetwork
 pub async fn get_vaults_addresses(
-    rpc_api_keys: Arc<Vec<String>>,
     rpc_block_map: HashMap<String, (u64, u64)>,
     app_state: Data<AppState>,
 ) -> Result<Vec<H160>> {
+    // Fetch the vault addresses associated with the kalypso subnetwork from the 'KalypsoMiddleware' contract through the RPCs
     let Some(vault_addresses_encoded) = call_txn_with_rpcs(
         rpc_block_map,
-        rpc_api_keys,
         app_state.chain_id,
         app_state.kalypso_middleware_addr,
         &app_state.kalypso_middleware_abi,
@@ -89,6 +101,7 @@ pub async fn get_vaults_addresses(
     else {
         return Err(anyhow!("Failed to fetch the vault addresses token"));
     };
+    // Decode the vault addresses list from the RPC response
     let Some(vault_addresses) = decode(
         &[ParamType::Array(Box::new(ParamType::Address))],
         &vault_addresses_encoded,
@@ -106,15 +119,24 @@ pub async fn get_vaults_addresses(
         .collect())
 }
 
+/*
+  GET THE STAKES DATA ASSOCIATED WITH A VAULT FOR THE KALYPSO SUBNETWORK
+  -> Get the stake token address of the vault
+  -> Get the base delegator contract address of the vault
+  -> Get the operator-vault-opt-in-service contract address from the delegator contract
+  -> Get the operator-network-opt-in-service contract address from the delegator contract
+  -> Get the operator registry (associated with the vault) contract address from the operator-vault-opt-in-service contract
+  -> Get the total operator entities count from the operator registry contract
+  -> Loop through each index from 0 to totalEntities, Collect the stake amount associated with the operator address at that index
+*/
 pub async fn get_stakes_data_for_vault(
     vault: &Address,
-    rpc_api_keys: Arc<Vec<String>>,
     rpc_block_map: HashMap<String, (u64, u64)>,
     app_state: Data<AppState>,
 ) -> Result<Vec<VaultSnapshot>> {
+    // Fetch the stake token (collateral) associated with the vault contract through the RPCs
     let Some(stake_token_encoded) = call_txn_with_rpcs(
         rpc_block_map.clone(),
-        rpc_api_keys.clone(),
         app_state.chain_id,
         vault.clone(),
         &app_state.vault_abi,
@@ -124,6 +146,7 @@ pub async fn get_stakes_data_for_vault(
     else {
         return Err(anyhow!("Failed to fetch the vault collateral token"));
     };
+    // Decode the address from the RPC response
     let Some(stake_token) = decode(&[ParamType::Address], &stake_token_encoded)
         .context("Failed to decode stakeToken from rpc call response")?[0]
         .clone()
@@ -132,9 +155,9 @@ pub async fn get_stakes_data_for_vault(
         return Err(anyhow!("Failed to decode the stakeToken"));
     };
 
+    // Fetch the base collateral from the vault contract through the RPCs
     let Some(delegator_encoded) = call_txn_with_rpcs(
         rpc_block_map.clone(),
-        rpc_api_keys.clone(),
         app_state.chain_id,
         vault.clone(),
         &app_state.vault_abi,
@@ -144,6 +167,7 @@ pub async fn get_stakes_data_for_vault(
     else {
         return Err(anyhow!("Failed to fetch the vault delegator address"));
     };
+    // Decode the address from the RPC response
     let Some(delegator) = decode(&[ParamType::Address], &delegator_encoded)
         .context("Failed to decode delegator from rpc call response")?[0]
         .clone()
@@ -152,9 +176,9 @@ pub async fn get_stakes_data_for_vault(
         return Err(anyhow!("Failed to decode the delegator"));
     };
 
+    // Fetch the operator-vault-opt-in-service contract from the delegator contract through the RPCs
     let Some(operator_vault_opt_in_encoded) = call_txn_with_rpcs(
         rpc_block_map.clone(),
-        rpc_api_keys.clone(),
         app_state.chain_id,
         delegator.clone(),
         &app_state.base_delegator_abi,
@@ -163,23 +187,24 @@ pub async fn get_stakes_data_for_vault(
     .await
     else {
         return Err(anyhow!(
-            "Failed to fetch the operator vault opt in service address"
+            "Failed to fetch the operator-vault-opt-in-service address"
         ));
     };
+    // Decode the address from the RPC response
     let Some(operator_vault_opt_in_service) =
         decode(&[ParamType::Address], &operator_vault_opt_in_encoded)
-            .context("Failed to decode operator vault opt in service from rpc call response")?[0]
+            .context("Failed to decode operator-vault-opt-in-service from rpc call response")?[0]
             .clone()
             .into_address()
     else {
         return Err(anyhow!(
-            "Failed to decode the operator vault opt in service address"
+            "Failed to decode the operator-vault-opt-in-service address"
         ));
     };
 
+    // Fetch the operator-network-opt-in-service contract from the delegator contract through the RPCs
     let Some(operator_network_opt_in_encoded) = call_txn_with_rpcs(
         rpc_block_map.clone(),
-        rpc_api_keys.clone(),
         app_state.chain_id,
         delegator.clone(),
         &app_state.base_delegator_abi,
@@ -188,23 +213,24 @@ pub async fn get_stakes_data_for_vault(
     .await
     else {
         return Err(anyhow!(
-            "Failed to fetch the operator network opt in service address"
+            "Failed to fetch the operator-network-opt-in-service address"
         ));
     };
+    // Decode the address from the RPC response
     let Some(operator_network_opt_in_service) =
         decode(&[ParamType::Address], &operator_network_opt_in_encoded)
-            .context("Failed to decode operator network opt in service from rpc call response")?[0]
+            .context("Failed to decode operator-network-opt-in-service from rpc call response")?[0]
             .clone()
             .into_address()
     else {
         return Err(anyhow!(
-            "Failed to decode the operator network opt in service address"
+            "Failed to decode the operator-network-opt-in-service address"
         ));
     };
 
+    // Fetch the operator registry contract from the operator-vault-opt-in-service contract through the RPCs
     let Some(operator_registry_encoded) = call_txn_with_rpcs(
         rpc_block_map.clone(),
-        rpc_api_keys.clone(),
         app_state.chain_id,
         operator_vault_opt_in_service.clone(),
         &app_state.opt_in_service_abi,
@@ -214,6 +240,7 @@ pub async fn get_stakes_data_for_vault(
     else {
         return Err(anyhow!("Failed to fetch the operator registry address"));
     };
+    // Decode the address from the RPC response
     let Some(operator_registry) = decode(&[ParamType::Address], &operator_registry_encoded)
         .context("Failed to decode operator registry from rpc call response")?[0]
         .clone()
@@ -222,9 +249,9 @@ pub async fn get_stakes_data_for_vault(
         return Err(anyhow!("Failed to decode the operator registry address"));
     };
 
+    // Fetch the total operator entities associated with the registry contract through the RPCs
     let Some(operator_entities_encoded) = call_txn_with_rpcs(
         rpc_block_map.clone(),
-        rpc_api_keys.clone(),
         app_state.chain_id,
         operator_registry.clone(),
         &app_state.registry_abi,
@@ -234,6 +261,7 @@ pub async fn get_stakes_data_for_vault(
     else {
         return Err(anyhow!("Failed to fetch the operator total entities"));
     };
+    // Decode the count from the RPC response
     let Some(operator_entities) = decode(&[ParamType::Uint(256)], &operator_entities_encoded)
         .context("Failed to decode operator total entities from rpc call response")?[0]
         .clone()
@@ -242,108 +270,57 @@ pub async fn get_stakes_data_for_vault(
         return Err(anyhow!("Failed to decode the operator total entities"));
     };
 
-    let mut operators_list: Vec<H160> = Vec::new();
+    // Create a mpsc channel
+    let (tx, mut rx) = mpsc::channel::<Result<(H160, U256)>>(100);
+
+    // For each operator in the registry, fetch their stake amount in the vault at the given timestamp if they are a part of the kalypso subnetwork
     let mut operator_ind = U256::zero();
     while operator_ind < operator_entities {
-        let Some(operator_address_encoded) = call_txn_with_rpcs(
-            rpc_block_map.clone(),
-            rpc_api_keys.clone(),
-            app_state.chain_id,
-            operator_registry.clone(),
-            &app_state.registry_abi,
-            ViewTxnData::Entity(operator_ind),
-        )
-        .await
-        else {
-            return Err(anyhow!("Failed to fetch the operator entity address"));
-        };
-        let Some(operator_address) = decode(&[ParamType::Address], &operator_address_encoded)
-            .context("Failed to decode operator entity address from rpc call response")?[0]
-            .clone()
-            .into_address()
-        else {
-            return Err(anyhow!("Failed to decode the operator entity address"));
-        };
+        let tx_clone = tx.clone();
+        let vault_clone = vault.clone();
+        let rpc_block_map_clone = rpc_block_map.clone();
+        let app_state_clone = app_state.clone();
 
-        operators_list.push(operator_address);
+        tokio::spawn(async move {
+            let _ = tx_clone
+                .send(
+                    get_stake_amount(
+                        operator_ind,
+                        vault_clone,
+                        operator_registry,
+                        operator_vault_opt_in_service,
+                        operator_network_opt_in_service,
+                        delegator,
+                        rpc_block_map_clone,
+                        app_state_clone,
+                    )
+                    .await,
+                )
+                .await;
+        });
+
         operator_ind += U256::one();
     }
 
+    drop(tx);
+
+    // Collect the stake amounts of operators through the receiver channel receiving the data parallely
     let mut vault_snapshots: Vec<VaultSnapshot> = Vec::new();
-    for operator in operators_list.iter() {
-        let Some(opted_in_vault_encoded) = call_txn_with_rpcs(
-            rpc_block_map.clone(),
-            rpc_api_keys.clone(),
-            app_state.chain_id,
-            operator_vault_opt_in_service.clone(),
-            &app_state.opt_in_service_abi,
-            ViewTxnData::IsOptedIn(operator.clone(), vault.clone()),
-        )
-        .await
-        else {
-            return Err(anyhow!("Failed to fetch is operator opted in vault"));
-        };
-        let Some(opted_in_vault) = decode(&[ParamType::Bool], &opted_in_vault_encoded)
-            .context("Failed to decode is operator opted in vault from rpc call response")?[0]
-            .clone()
-            .into_bool()
-        else {
-            return Err(anyhow!("Failed to decode is operator opted in vault"));
+    while let Some(stake_amount) = rx.recv().await {
+        let Ok((operator, stake_amount)) = stake_amount else {
+            return Err(anyhow!(
+                "Failed to fetch stake amount for an operator: {:?}",
+                stake_amount.unwrap_err()
+            ));
         };
 
-        if !opted_in_vault {
+        // If operator address is zero then skip it (isn't registered in the kalypso subnetwork)
+        if operator.is_zero() {
             continue;
         }
-
-        let Some(opted_in_network_encoded) = call_txn_with_rpcs(
-            rpc_block_map.clone(),
-            rpc_api_keys.clone(),
-            app_state.chain_id,
-            operator_network_opt_in_service.clone(),
-            &app_state.opt_in_service_abi,
-            ViewTxnData::IsOptedIn(
-                operator.clone(),
-                h256_to_address(app_state.kalypso_subnetwork),
-            ),
-        )
-        .await
-        else {
-            return Err(anyhow!("Failed to fetch is operator opted in network"));
-        };
-        let Some(opted_in_network) = decode(&[ParamType::Bool], &opted_in_network_encoded)
-            .context("Failed to decode is operator opted in network from rpc call response")?[0]
-            .clone()
-            .into_bool()
-        else {
-            return Err(anyhow!("Failed to decode is operator opted in network"));
-        };
-
-        if !opted_in_network {
-            continue;
-        }
-
-        let Some(stake_amount_encoded) = call_txn_with_rpcs(
-            rpc_block_map.clone(),
-            rpc_api_keys.clone(),
-            app_state.chain_id,
-            delegator.clone(),
-            &app_state.base_delegator_abi,
-            ViewTxnData::StakeAt(app_state.kalypso_subnetwork, operator.clone(), 0),
-        )
-        .await
-        else {
-            return Err(anyhow!("Failed to fetch the stake amount"));
-        };
-        let Some(stake_amount) = decode(&[ParamType::Uint(256)], &stake_amount_encoded)
-            .context("Failed to decode the stake amount from rpc call response")?[0]
-            .clone()
-            .into_uint()
-        else {
-            return Err(anyhow!("Failed to decode the stake amount"));
-        };
 
         vault_snapshots.push(VaultSnapshot {
-            operator: operator.clone(),
+            operator: operator,
             vault: vault.clone(),
             stake_token: stake_token,
             stake_amount: stake_amount,
@@ -542,31 +519,172 @@ pub async fn get_stakes_data_for_vault(
 //     Ok(jobs_slashed)
 // }
 
+// Get the stake amount in the provided vault of the given operator index in the operator registry
+async fn get_stake_amount(
+    operator_ind: U256,
+    vault: H160,
+    operator_registry: H160,
+    operator_vault_opt_in_service: H160,
+    operator_network_opt_in_service: H160,
+    delegator: H160,
+    rpc_block_map: HashMap<String, (u64, u64)>,
+    app_state: Data<AppState>,
+) -> Result<(H160, U256)> {
+    // Fetch the operator using the index from the operator registry contract through the RPCs
+    let Some(operator_address_encoded) = call_txn_with_rpcs(
+        rpc_block_map.clone(),
+        app_state.chain_id,
+        operator_registry.clone(),
+        &app_state.registry_abi,
+        ViewTxnData::Entity(operator_ind),
+    )
+    .await
+    else {
+        return Err(anyhow!(
+            "Failed to fetch the operator entity address for index {}",
+            operator_ind
+        ));
+    };
+    // Decode the address from the RPC responses
+    let Some(operator) = decode(&[ParamType::Address], &operator_address_encoded)
+        .context("Failed to decode operator entity address from rpc call response")?[0]
+        .clone()
+        .into_address()
+    else {
+        return Err(anyhow!(
+            "Failed to decode the operator entity address for index {}",
+            operator_ind
+        ));
+    };
+
+    // Fetch whether the given operator is opted in the provided vault from the operator-vault-opt-in-service contract through the RPCs
+    let Some(opted_in_vault_encoded) = call_txn_with_rpcs(
+        rpc_block_map.clone(),
+        app_state.chain_id,
+        operator_vault_opt_in_service.clone(),
+        &app_state.opt_in_service_abi,
+        ViewTxnData::IsOptedIn(operator.clone(), vault.clone()),
+    )
+    .await
+    else {
+        return Err(anyhow!(
+            "Failed to fetch is-operator-opted-in-vault for ({},{})",
+            operator,
+            vault
+        ));
+    };
+    // Decode the boolean from the RPC response
+    let Some(opted_in_vault) = decode(&[ParamType::Bool], &opted_in_vault_encoded)
+        .context("Failed to decode is-operator-opted-in-vault from rpc call response")?[0]
+        .clone()
+        .into_bool()
+    else {
+        return Err(anyhow!(
+            "Failed to decode is-operator-opted-in-vault for ({},{})",
+            operator,
+            vault
+        ));
+    };
+
+    // Return zero values if the operator is not opted in the vault
+    if !opted_in_vault {
+        return Ok((H160::zero(), U256::zero()));
+    }
+
+    // Fetch whether the given operator is opted in the kalypso subnetwork from the operator-network-opt-in-service contract through the RPCs
+    let Some(opted_in_network_encoded) = call_txn_with_rpcs(
+        rpc_block_map.clone(),
+        app_state.chain_id,
+        operator_network_opt_in_service.clone(),
+        &app_state.opt_in_service_abi,
+        ViewTxnData::IsOptedIn(
+            operator.clone(),
+            h256_to_address(app_state.kalypso_subnetwork),
+        ),
+    )
+    .await
+    else {
+        return Err(anyhow!(
+            "Failed to fetch is-operator-opted-in-network for operator {}",
+            operator
+        ));
+    };
+    // Decode the boolean from the RPC response
+    let Some(opted_in_network) = decode(&[ParamType::Bool], &opted_in_network_encoded)
+        .context("Failed to decode is-operator-opted-in-network from rpc call response")?[0]
+        .clone()
+        .into_bool()
+    else {
+        return Err(anyhow!(
+            "Failed to decode is-operator-opted-in-network for operator {}",
+            operator
+        ));
+    };
+
+    // Return zero values if the operator is not opted in the kalypso subnetwork
+    if !opted_in_network {
+        return Ok((H160::zero(), U256::zero()));
+    }
+
+    // Fetch the operator stake in the provided symbiotic vault from the delegator contract through the RPCs
+    let Some(stake_amount_encoded) = call_txn_with_rpcs(
+        rpc_block_map.clone(),
+        app_state.chain_id,
+        delegator.clone(),
+        &app_state.base_delegator_abi,
+        ViewTxnData::StakeAt(app_state.kalypso_subnetwork, operator.clone(), 0),
+    )
+    .await
+    else {
+        return Err(anyhow!(
+            "Failed to fetch the stake amount for operator {}",
+            operator
+        ));
+    };
+    // Decode the amount from the RPC response
+    let Some(stake_amount) = decode(&[ParamType::Uint(256)], &stake_amount_encoded)
+        .context("Failed to decode the stake amount from rpc call response")?[0]
+        .clone()
+        .into_uint()
+    else {
+        return Err(anyhow!(
+            "Failed to decode the stake amount for operator {}",
+            operator
+        ));
+    };
+
+    return Ok((operator, stake_amount));
+}
+
+// Method returning the state read call response for a smart contract using the configured RPCs
 async fn call_txn_with_rpcs(
     rpc_block_map: HashMap<String, (u64, u64)>,
-    rpc_api_keys: Arc<Vec<String>>,
     chain_id: u64,
     contract_addr: H160,
     contract_abi: &Abi,
     view_txn_data: ViewTxnData,
 ) -> Option<Bytes> {
+    // Generate the transaction object using the contract address, ABI and method data
     let txn = generate_txn(contract_addr, contract_abi, view_txn_data.clone());
-
     let Ok(mut txn) = txn else {
-        eprintln!("Failed to generate transaction: {:?}", txn.unwrap_err());
+        eprintln!(
+            "Failed to generate {} transaction: {:?}",
+            view_txn_data.as_str(),
+            txn.unwrap_err()
+        );
         return None;
     };
-
     let txn: Arc<TypedTransaction> = txn.set_chain_id(chain_id).to_owned().into();
 
-    // Create an mpsc channel
+    // Create a mpsc channel
     let (tx, mut rx) = mpsc::channel::<Bytes>(10);
 
+    // Call the transaction from each RPC in the mapping
     for (rpc_url, (block_num, timestamp)) in rpc_block_map {
         let tx_clone = tx.clone();
-        let rpc_api_keys_clone = Arc::clone(&rpc_api_keys);
         let mut txn_clone = Arc::clone(&txn);
 
+        // Update the timestamp for calling the 'stake' method in the symbiotic delegator contract according to the latest/provided RPC block
         if let ViewTxnData::StakeAt(subnetwork, operator, _) = view_txn_data {
             txn_clone = generate_txn(
                 contract_addr,
@@ -580,27 +698,35 @@ async fn call_txn_with_rpcs(
         }
 
         tokio::spawn(async move {
-            call_txn_with_retries(rpc_url, rpc_api_keys_clone, txn_clone, block_num, tx_clone)
-                .await;
+            call_txn_with_retries(&rpc_url, txn_clone, block_num, tx_clone).await;
         });
     }
 
     drop(tx);
 
+    // Gather the RPC responses for the given transaction concurrently
     let mut txn_results = Vec::new();
     while let Some(result) = rx.recv().await {
         txn_results.push(result);
     }
 
+    // Revert if responses less than the minimum required for validation
     if txn_results.len() < MIN_NUMBER_OF_RPC_RESPONSES {
-        eprintln!("Failed to get enough number of responses from rpcs\n");
+        eprintln!(
+            "Failed to get enough number of responses from rpcs for {} transaction",
+            view_txn_data.as_str()
+        );
         return None;
     }
 
+    // Check whether all the RPC responses match
     let response = txn_results.pop().unwrap();
     while txn_results.len() > 0 {
         if response != txn_results.pop().unwrap() {
-            eprintln!("Mismatch in rpc responses");
+            eprintln!(
+                "Mismatch in rpc responses for {} transaction",
+                view_txn_data.as_str()
+            );
             return None;
         }
     }
@@ -608,95 +734,106 @@ async fn call_txn_with_rpcs(
     return Some(response);
 }
 
+// Method calling a read transaction from a RPC with retries
 async fn call_txn_with_retries(
-    rpc_url: String,
-    rpc_api_keys: Arc<Vec<String>>,
+    http_rpc_url: &String,
     txn: Arc<TypedTransaction>,
     block_num: u64,
     tx: Sender<Bytes>,
 ) {
-    for api_key in rpc_api_keys.iter() {
-        let http_rpc_client = Provider::<Http>::try_from(format!("{}/{}", rpc_url, api_key));
-        let Ok(http_rpc_client) = http_rpc_client else {
-            eprintln!(
-                "Failed to initialize http rpc client: {:?}",
-                http_rpc_client.unwrap_err()
-            );
-            continue;
-        };
+    // Initialize the RPC Client from the given URL
+    let http_rpc_client = Provider::<Http>::try_from(http_rpc_url);
+    let Ok(http_rpc_client) = http_rpc_client else {
+        eprintln!(
+            "Failed to initialize http rpc {} client: {:?}",
+            http_rpc_url,
+            http_rpc_client.unwrap_err()
+        );
+        return;
+    };
 
-        let txn_result = Retry::spawn(
-            ExponentialBackoff::from_millis(5).map(jitter).take(3),
-            || async { http_rpc_client.call(&txn, Some(block_num.into())).await },
-        )
-        .await;
-        let Ok(txn_result) = txn_result else {
-            eprintln!(
-                "Failed to retrieve response from http rpc client: {:?}",
-                txn_result.unwrap_err()
-            );
-            continue;
-        };
+    // Call the transaction with the provided block number from the mapping
+    let txn_result = Retry::spawn(
+        ExponentialBackoff::from_millis(5).map(jitter).take(3),
+        || async { http_rpc_client.call(&txn, Some(block_num.into())).await },
+    )
+    .await;
+    let Ok(txn_result) = txn_result else {
+        eprintln!(
+            "Failed to retrieve txn {:?} response from http rpc {} client: {:?}",
+            txn,
+            http_rpc_url,
+            txn_result.unwrap_err()
+        );
+        return;
+    };
 
-        if let Err(err) = tx.send(txn_result).await {
-            eprintln!(
-                "Failed to send rpc response to the receiver channel: {:?}",
-                err
-            );
-            continue;
-        }
-
+    // Send the transaction response from the RPC to the response receiver channel
+    if let Err(err) = tx.send(txn_result).await {
+        eprintln!(
+            "Failed to send rpc {} response to the receiver channel: {:?}",
+            http_rpc_url, err
+        );
         return;
     }
 }
 
-// Get the latest block number and its timestamp
+// Get the block number (latest, if not provided) and its timestamp for a given RPC
 async fn get_block_metadata(
     http_rpc_url: &String,
-    rpc_api_keys: &Vec<String>,
     block_number: Option<u64>,
 ) -> Option<(u64, u64)> {
-    for api_key in rpc_api_keys.iter() {
-        let http_rpc_client = Provider::<Http>::try_from(format!("{}/{}", http_rpc_url, api_key));
-        let Ok(http_rpc_client) = http_rpc_client else {
-            eprintln!(
-                "Failed to initialize http rpc client: {:?}",
-                http_rpc_client.unwrap_err()
-            );
-            continue;
-        };
+    // Initialize the RPC Client from the given URL
+    let http_rpc_client = Provider::<Http>::try_from(http_rpc_url);
+    let Ok(http_rpc_client) = http_rpc_client else {
+        eprintln!(
+            "Failed to initialize http rpc {} client: {:?}",
+            http_rpc_url,
+            http_rpc_client.unwrap_err()
+        );
+        return None;
+    };
 
-        let block = Retry::spawn(
-            ExponentialBackoff::from_millis(5).map(jitter).take(3),
-            || async {
-                if block_number.is_none() {
-                    http_rpc_client.get_block(BlockNumber::Latest).await
-                } else {
-                    http_rpc_client
-                        .get_block(block_number.clone().unwrap())
-                        .await
-                }
-            },
-        )
-        .await;
-        let Ok(Some(block)) = block else {
-            eprintln!(
-                "Failed to retrieve response from http rpc client: {:?}",
-                block.unwrap_err()
-            );
-            continue;
-        };
+    // Call the get block data transaction from the given RPC (latest if nothing provided)
+    let block = Retry::spawn(
+        ExponentialBackoff::from_millis(5).map(jitter).take(3),
+        || async {
+            if block_number.is_none() {
+                http_rpc_client.get_block(BlockNumber::Latest).await
+            } else {
+                http_rpc_client
+                    .get_block(block_number.clone().unwrap())
+                    .await
+            }
+        },
+    )
+    .await;
+    let Ok(Some(block)) = block else {
+        eprintln!(
+            "Failed to retrieve block data at {:?} from http rpc {} client: {:?}",
+            block_number.clone(),
+            http_rpc_url,
+            block.unwrap_err()
+        );
+        return None;
+    };
 
-        let Some(block_number) = block.number else {
-            eprintln!("Failed to retrieve latest block from http rpc client");
-            continue;
-        };
-        let block_timestamp = block.timestamp.as_u64();
+    let mut block_num = block_number;
 
-        return Some((block_number.as_u64(), block_timestamp));
+    if block_num.is_none() {
+        block_num = block.number.map(|num| num.as_u64());
     }
 
-    return None;
+    // Revert if not abe to find the latest block number
+    if block_num.is_none() {
+        eprintln!(
+            "Failed to retrieve latest block number from http rpc {} client response",
+            http_rpc_url
+        );
+        return None;
+    }
+
+    return Some((block_num.unwrap(), block.timestamp.as_u64()));
 }
 
 // // Fetch the logs using the filter

@@ -305,9 +305,9 @@ pub async fn get_stakes_data_for_vault(
     drop(tx);
 
     // Collect the stake amounts of operators through the receiver channel receiving the data parallely
-    let mut vault_snapshots: Vec<VaultSnapshot> = Vec::new();
+    let mut delegated_stakes: HashMap<H160, U256> = HashMap::new();
     while let Some(stake_amount) = rx.recv().await {
-        let Ok((operator, stake_amount)) = stake_amount else {
+        let Ok((operator_delegate, stake_amount)) = stake_amount else {
             return Err(anyhow!(
                 "Failed to fetch stake amount for an operator: {:?}",
                 stake_amount.unwrap_err()
@@ -315,19 +315,25 @@ pub async fn get_stakes_data_for_vault(
         };
 
         // If operator address is zero then skip it (isn't registered in the kalypso subnetwork)
-        if operator.is_zero() {
+        if operator_delegate.is_zero() {
             continue;
         }
 
-        vault_snapshots.push(VaultSnapshot {
-            operator: operator,
-            vault: vault.clone(),
-            stake_token: stake_token,
-            stake_amount: stake_amount,
-        });
+        delegated_stakes
+            .entry(operator_delegate)
+            .and_modify(|stake| *stake += stake_amount)
+            .or_insert(stake_amount);
     }
 
-    Ok(vault_snapshots)
+    Ok(delegated_stakes
+        .iter()
+        .map(|(&delegate, &stake)| VaultSnapshot {
+            operator: delegate,
+            vault: vault.clone(),
+            stake_token: stake_token,
+            stake_amount: stake,
+        })
+        .collect())
 }
 
 // pub async fn get_slash_data_for_vault(
@@ -541,7 +547,7 @@ async fn get_stake_amount(
     .await
     else {
         return Err(anyhow!(
-            "Failed to fetch the operator entity address for index {}",
+            "Failed to fetch the operator entity address for index {:?}",
             operator_ind
         ));
     };
@@ -552,7 +558,7 @@ async fn get_stake_amount(
         .into_address()
     else {
         return Err(anyhow!(
-            "Failed to decode the operator entity address for index {}",
+            "Failed to decode the operator entity address for index {:?}",
             operator_ind
         ));
     };
@@ -568,7 +574,7 @@ async fn get_stake_amount(
     .await
     else {
         return Err(anyhow!(
-            "Failed to fetch is-operator-opted-in-vault for ({},{})",
+            "Failed to fetch is-operator-opted-in-vault for ({:?},{:?})",
             operator,
             vault
         ));
@@ -580,7 +586,7 @@ async fn get_stake_amount(
         .into_bool()
     else {
         return Err(anyhow!(
-            "Failed to decode is-operator-opted-in-vault for ({},{})",
+            "Failed to decode is-operator-opted-in-vault for ({:?},{:?})",
             operator,
             vault
         ));
@@ -605,7 +611,7 @@ async fn get_stake_amount(
     .await
     else {
         return Err(anyhow!(
-            "Failed to fetch is-operator-opted-in-network for operator {}",
+            "Failed to fetch is-operator-opted-in-network for operator {:?}",
             operator
         ));
     };
@@ -616,7 +622,7 @@ async fn get_stake_amount(
         .into_bool()
     else {
         return Err(anyhow!(
-            "Failed to decode is-operator-opted-in-network for operator {}",
+            "Failed to decode is-operator-opted-in-network for operator {:?}",
             operator
         ));
     };
@@ -637,7 +643,7 @@ async fn get_stake_amount(
     .await
     else {
         return Err(anyhow!(
-            "Failed to fetch the stake amount for operator {}",
+            "Failed to fetch the stake amount for operator {:?}",
             operator
         ));
     };
@@ -648,12 +654,39 @@ async fn get_stake_amount(
         .into_uint()
     else {
         return Err(anyhow!(
-            "Failed to decode the stake amount for operator {}",
+            "Failed to decode the stake amount for operator {:?}",
             operator
         ));
     };
 
-    return Ok((operator, stake_amount));
+    // Fetch the operator delegate from the kalypso middleware contract through the RPCs
+    let Some(operator_delegate_encoded) = call_txn_with_rpcs(
+        rpc_block_map.clone(),
+        app_state.chain_id,
+        app_state.kalypso_middleware_addr.clone(),
+        &app_state.kalypso_middleware_abi,
+        ViewTxnData::GetDelegate(operator),
+    )
+    .await
+    else {
+        return Err(anyhow!(
+            "Failed to fetch the delegate address for operator {:?}",
+            operator
+        ));
+    };
+    // Decode the address from the RPC responses
+    let Some(operator_delegate) = decode(&[ParamType::Address], &operator_delegate_encoded)
+        .context("Failed to decode operator delegate address from rpc call response")?[0]
+        .clone()
+        .into_address()
+    else {
+        return Err(anyhow!(
+            "Failed to decode the operator {:?} delegate address",
+            operator
+        ));
+    };
+
+    return Ok((operator_delegate, stake_amount));
 }
 
 // Method returning the state read call response for a smart contract using the configured RPCs

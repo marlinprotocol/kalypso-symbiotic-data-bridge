@@ -52,7 +52,7 @@ pub struct SignStakeRequest {
 pub struct SignSlashRequest {
     pub rpc_api_keys: Vec<String>,
     pub no_of_txs: usize,
-    pub from_block_number: u64,
+    pub capture_timestamp: u64,
     pub to_block_number: Option<u64>,
 }
 
@@ -84,6 +84,7 @@ pub struct SignedData {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewTxnData {
     GetVaults,
+    GetDelegate(Address),
     Collateral,
     Delegator,
     Slasher,
@@ -101,6 +102,7 @@ impl ViewTxnData {
     pub fn as_str(&self) -> &str {
         match &self {
             ViewTxnData::GetVaults => "getVaults",
+            ViewTxnData::GetDelegate(_) => "getDelegate",
             ViewTxnData::Collateral => "collateral",
             ViewTxnData::Delegator => "delegator",
             ViewTxnData::Slasher => "slasher",
@@ -140,15 +142,13 @@ pub fn generate_txn(
         | ViewTxnData::OperatorNetworkOptInService
         | ViewTxnData::WhoRegistry
         | ViewTxnData::TotalEntities => vec![],
+        ViewTxnData::GetDelegate(operator) => vec![Token::Address(operator)],
         ViewTxnData::Entity(ind) => vec![Token::Uint(ind.to_owned())],
-        ViewTxnData::IsOptedIn(who, wher) => vec![
-            Token::Address(who.to_owned()),
-            Token::Address(wher.to_owned()),
-        ],
+        ViewTxnData::IsOptedIn(who, wher) => vec![Token::Address(who), Token::Address(wher)],
         ViewTxnData::StakeAt(subnetwork, operator, timestamp) => vec![
             Token::FixedBytes(subnetwork.to_fixed_bytes().to_vec()),
-            Token::Address(operator.to_owned()),
-            Token::Uint(timestamp.to_owned().into()),
+            Token::Address(operator),
+            Token::Uint(timestamp.into()),
             Token::Bytes(vec![]),
         ],
     };

@@ -133,16 +133,16 @@ async fn read_and_sign_slashes(
         return HttpResponse::BadRequest().body("Number of Txns must be greater than 0!\n");
     }
 
-    // Get the mapping from RPC URLs to their corresponding blocks and timestamps (used while making state read calls)
-    let rpc_block_map: HashMap<String, (u64, u64)> = get_block_number_and_timestamps(
-        app_state.http_rpc_urls.clone(),
-        sign_slash_request.rpc_api_keys.into(),
-        sign_slash_request.to_block_number,
-    )
-    .await;
-    if rpc_block_map.len() < MIN_NUMBER_OF_RPC_RESPONSES {
-        return HttpResponse::InternalServerError().body("Rpc Server Error!/n");
-    }
+    // // Get the mapping from RPC URLs to their corresponding blocks and timestamps (used while making state read calls)
+    // let rpc_block_map: HashMap<String, (u64, u64)> = get_block_number_and_timestamps(
+    //     app_state.http_rpc_urls.clone(),
+    //     sign_slash_request.rpc_api_keys.into(),
+    //     sign_slash_request.to_block_number,
+    // )
+    // .await;
+    // if rpc_block_map.len() < MIN_NUMBER_OF_RPC_RESPONSES {
+    //     return HttpResponse::InternalServerError().body("Rpc Server Error!/n");
+    // }
 
     // let vaults_list = get_vaults_addresses(
     //     sign_slash_request.rpc_api_keys.clone().into(),
@@ -188,17 +188,17 @@ async fn read_and_sign_slashes(
     //     ));
     // }
 
-    // Calculate the capture timestamp to be used for signing and posting the data on the L2 contract
-    let mut capture_timestamp = 0;
-    for (_, timestamp) in rpc_block_map.values() {
-        capture_timestamp = cmp::max(capture_timestamp, timestamp.clone());
-    }
+    // // Calculate the capture timestamp to be used for signing and posting the data on the L2 contract
+    // let mut capture_timestamp = 0;
+    // for (_, timestamp) in rpc_block_map.values() {
+    //     capture_timestamp = cmp::max(capture_timestamp, timestamp.clone());
+    // }
 
     // Get the signed data to be submitted on-chain
     let signed_data = sign_slash_results(
         slash_results,
         sign_slash_request.no_of_txs,
-        capture_timestamp,
+        sign_slash_request.capture_timestamp,
         &app_state.enclave_signer,
     );
     let Ok(signed_data) = signed_data else {
@@ -210,7 +210,7 @@ async fn read_and_sign_slashes(
 
     HttpResponse::Ok().json(json!({
         "no_of_txs": sign_slash_request.no_of_txs,
-        "capture_timestamp": capture_timestamp,
+        "capture_timestamp": sign_slash_request.capture_timestamp,
         "signed_data": signed_data,
     }))
 }

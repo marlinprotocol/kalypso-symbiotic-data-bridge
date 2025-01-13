@@ -2,7 +2,7 @@
     "chain_id": 17000,
     "kalypso_subnetwork": "0xa2024540267e3366b1d3381285dd11a1b45928df000000000000000000000000",
     "http_rpc_urls": [
-        "https://ethereum-holesky-rpc.publicnode.com",
+        "https://rpc.holesky.ethpandaops.io",
         "https://holesky.infura.io/v3",
         "https://eth-holesky.g.alchemy.com/v2"
     ],

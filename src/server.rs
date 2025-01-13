@@ -1,4 +1,3 @@
-use std::cmp;
 use std::collections::HashMap;
 
 use actix_web::web::{Data, Json};
@@ -90,8 +89,12 @@ async fn read_and_sign_stakes(
 
     // Calculate the capture timestamp to be used for signing and posting the data on the L2 contract
     let mut capture_timestamp = 0;
-    for (_, timestamp) in rpc_block_map.values() {
-        capture_timestamp = cmp::max(capture_timestamp, timestamp.clone());
+    let mut block_number = 0;
+    for (num, timestamp) in rpc_block_map.values() {
+        if timestamp >= &capture_timestamp {
+            capture_timestamp = timestamp.clone();
+            block_number = num.clone();
+        }
     }
 
     // Get the signed data to be submitted on-chain
@@ -111,6 +114,7 @@ async fn read_and_sign_stakes(
     HttpResponse::Ok().json(json!({
         "no_of_txs": sign_stake_request.no_of_txs,
         "capture_timestamp": capture_timestamp,
+        "block_number": block_number,
         "signed_data": signed_data,
     }))
 }

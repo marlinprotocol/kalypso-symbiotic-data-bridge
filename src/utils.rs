@@ -9,6 +9,7 @@ use serde_json::from_str;
 pub const MIN_NUMBER_OF_RPC_RESPONSES: usize = 1;
 pub const LATEST_BLOCK_MAX_VALIDITY: u64 = 60; // in seconds
 pub const LATEST_BLOCK_ESTIMATION_BUFFER: u64 = 35;
+pub const OPERATOR_BATCH_SIZE: usize = 80; // for salmon network
 
 pub struct ConfigManager {
     pub path: String,

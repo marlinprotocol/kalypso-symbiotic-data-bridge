@@ -1,3 +1,4 @@
+use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -270,59 +271,64 @@ pub async fn get_stakes_data_for_vault(
         return Err(anyhow!("Failed to decode the operator total entities"));
     };
 
-    // Create a mpsc channel
-    let (tx, mut rx) = mpsc::channel::<Result<(H160, U256)>>(100);
+    // Collect the stake amounts of operators through the receiver channel receiving the data parallely
+    let mut delegated_stakes: HashMap<H160, U256> = HashMap::new();
 
     // For each operator in the registry, fetch their stake amount in the vault at the given timestamp if they are a part of the kalypso subnetwork
     let mut operator_ind = U256::zero();
     while operator_ind < operator_entities {
-        let tx_clone = tx.clone();
-        let vault_clone = vault.clone();
-        let rpc_block_map_clone = rpc_block_map.clone();
-        let app_state_clone = app_state.clone();
+        let operator_batch = min(operator_ind + OPERATOR_BATCH_SIZE, operator_entities);
 
-        tokio::spawn(async move {
-            let _ = tx_clone
-                .send(
-                    get_stake_amount(
-                        operator_ind,
-                        vault_clone,
-                        operator_registry,
-                        operator_vault_opt_in_service,
-                        operator_network_opt_in_service,
-                        delegator,
-                        rpc_block_map_clone,
-                        app_state_clone,
+        // Create a mpsc channel
+        let (tx, mut rx) = mpsc::channel::<Result<(H160, U256)>>(100);
+
+        while operator_ind < operator_batch {
+            let tx_clone = tx.clone();
+            let vault_clone = vault.clone();
+            let rpc_block_map_clone = rpc_block_map.clone();
+            let app_state_clone = app_state.clone();
+
+            tokio::spawn(async move {
+                let _ = tx_clone
+                    .send(
+                        get_stake_amount(
+                            operator_ind,
+                            vault_clone,
+                            operator_registry,
+                            operator_vault_opt_in_service,
+                            operator_network_opt_in_service,
+                            delegator,
+                            rpc_block_map_clone,
+                            app_state_clone,
+                        )
+                        .await,
                     )
-                    .await,
-                )
-                .await;
-        });
+                    .await;
+            });
 
-        operator_ind += U256::one();
-    }
-
-    drop(tx);
-
-    // Collect the stake amounts of operators through the receiver channel receiving the data parallely
-    let mut delegated_stakes: HashMap<H160, U256> = HashMap::new();
-    while let Some(stake_amount) = rx.recv().await {
-        let Ok((operator_delegate, stake_amount)) = stake_amount else {
-            return Err(anyhow!(
-                "Failed to fetch stake amount for an operator: {:?}",
-                stake_amount.unwrap_err()
-            ));
-        };
-
-        // If operator address is zero then skip it (isn't registered in the kalypso subnetwork)
-        if operator_delegate.is_zero() {
-            continue;
+            operator_ind += U256::one();
         }
 
-        delegated_stakes
-            .entry(operator_delegate)
-            .and_modify(|stake| *stake += stake_amount)
-            .or_insert(stake_amount);
+        drop(tx);
+
+        while let Some(stake_amount) = rx.recv().await {
+            let Ok((operator_delegate, stake_amount)) = stake_amount else {
+                return Err(anyhow!(
+                    "Failed to fetch stake amount for an operator: {:?}",
+                    stake_amount.unwrap_err()
+                ));
+            };
+
+            // If operator address is zero then skip it (isn't registered in the kalypso subnetwork)
+            if operator_delegate.is_zero() {
+                continue;
+            }
+
+            delegated_stakes
+                .entry(operator_delegate)
+                .and_modify(|stake| *stake += stake_amount)
+                .or_insert(stake_amount);
+        }
     }
 
     Ok(delegated_stakes
@@ -787,7 +793,7 @@ async fn call_txn_with_retries(
 
     // Call the transaction with the provided block number from the mapping
     let txn_result = Retry::spawn(
-        ExponentialBackoff::from_millis(5).map(jitter).take(3),
+        ExponentialBackoff::from_millis(10).map(jitter).take(5),
         || async { http_rpc_client.call(&txn, Some(block_num.into())).await },
     )
     .await;

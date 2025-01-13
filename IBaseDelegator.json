@@ -1,0 +1,62 @@
+[
+    {
+        "type": "function",
+        "name": "OPERATOR_VAULT_OPT_IN_SERVICE",
+        "inputs": [],
+        "outputs": [
+            {
+                "name": "",
+                "type": "address",
+                "internalType": "address"
+            }
+        ],
+        "stateMutability": "view"
+    },
+    {
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function",
+        "name": "OPERATOR_NETWORK_OPT_IN_SERVICE",
+        "outputs": [
+            {
+                "internalType": "address",
+                "name": "",
+                "type": "address"
+            }
+        ]
+    },
+    {
+        "type": "function",
+        "name": "stakeAt",
+        "inputs": [
+            {
+                "name": "subnetwork",
+                "type": "bytes32",
+                "internalType": "bytes32"
+            },
+            {
+                "name": "operator",
+                "type": "address",
+                "internalType": "address"
+            },
+            {
+                "name": "timestamp",
+                "type": "uint48",
+                "internalType": "uint48"
+            },
+            {
+                "name": "hints",
+                "type": "bytes",
+                "internalType": "bytes"
+            }
+        ],
+        "outputs": [
+            {
+                "name": "",
+                "type": "uint256",
+                "internalType": "uint256"
+            }
+        ],
+        "stateMutability": "view"
+    }
+]
